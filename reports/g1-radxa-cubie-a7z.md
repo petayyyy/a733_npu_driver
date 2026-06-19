@@ -20,6 +20,9 @@ Date: 2026-06-20 local / 2026-06-19 UTC
 - Model size: 2,452,448 bytes
 - Single-image test binary built from existing source:
   `/home/radxa/yolo_shm/build/test_npu_a733`
+- Public SDK cloned to `/home/radxa/ai-sdk` from `ZIFENG278/ai-sdk`.
+- Standard `examples/vpm_run` binary built successfully for
+  `AI_SDK_PLATFORM=a733 NPU_SW_VERSION=v2.0`.
 
 ## Inference Command
 
@@ -63,9 +66,22 @@ Final smoke-test summary with the custom YOLO command:
 Summary: pass=6 warn=2 fail=0
 ```
 
+Standard `vpm_run` sample also runs after pointing the sample file at
+`operator/v3/network_binary.nb`:
+
+```text
+cid=0x1000003b, device_count=1
+  device[0] core_count=1
+profile inference time=2807us, cycle=2775153
+vpm run ret=0
+```
+
 ## Notes
 
 - `vpm_run` was not found on the image.
+- I built `vpm_run` from `/home/radxa/ai-sdk/examples/vpm_run`; the stock
+  `operator/sample.txt` expected `./network_binary.nb`, while the SDK actually
+  ships the sample NBGs under `operator/v2` and `operator/v3`.
 - The existing `run_yolo.sh` referenced `build/test_npu_a733`, but that target
   was not present. I built it from the existing `test_main.cpp` and project
   sources.

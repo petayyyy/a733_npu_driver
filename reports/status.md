@@ -15,11 +15,16 @@
 - Gate G1 passed: `/dev/vipcore` present; VIPLite 2.0.3.2 loaded
   `yolov8n_6_uint8_a733.nb`; single-image YOLO inference on `dog.jpg` produced
   bicycle/dog/car detections.
+- Built standard SDK `examples/vpm_run` on the board from `ZIFENG278/ai-sdk`;
+  `operator/v3/network_binary.nb` runs with `cid=0x1000003b` and
+  `profile inference time=2807us`.
+- Gate G2 passed for SDK LeNet: ACUITY Docker `ubuntu-npu:v2.0.10.1` generated
+  uint8 and int16 NBG files, both validated on the A733 through `vpm_run`.
 
 ## Next Gate
 
-Phase 2 / ACUITY toolchain:
+Phase 2 extension / custom model:
 
-1. Start Docker daemon on host or provide ACUITY image `ubuntu-npu:v2.0.10`.
-2. Convert a known ONNX CNN to NBG with int16 quantization.
-3. Validate converted NBG on the Radxa board.
+1. Convert a custom ONNX CNN to NBG with int16 quantization.
+2. Validate converted NBG on the Radxa board.
+3. Start Phase 3a vision-encoder candidate selection.

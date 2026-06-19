@@ -1,6 +1,6 @@
 param(
     [string]$Root = (Get-Location).Path,
-    [string]$AcuityImage = "ubuntu-npu:v2.0.10",
+    [string]$AcuityImage = "ubuntu-npu:v2.0.10.1",
     [switch]$Strict
 )
 

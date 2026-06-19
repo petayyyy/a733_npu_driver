@@ -53,10 +53,15 @@ Gate G2:
 - Converted NBG runs on board.
 - Accuracy is compared against ONNX baseline and recorded.
 
+Current status: passed for SDK LeNet in both uint8 and int16 using
+`ubuntu-npu:v2.0.10.1`. The remaining G2 extension is a custom ONNX CNN or
+vision encoder.
+
 Primary script:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\host\prepare-workspace.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\host\prepare-workspace.ps1 `
+  -AcuityImage ubuntu-npu:v2.0.10.1
 ```
 
 ## Phase 3a - Hybrid VLM Path

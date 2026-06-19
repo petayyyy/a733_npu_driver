@@ -11,7 +11,7 @@ decoder runs on CPU.
 - Phase 1 / G1: scripts prepared for `/dev/vipcore`, VIPLite, and `vpm_run`
   smoke testing.
 - Phase 2+: host-side workspace scaffolding prepared; ACUITY conversion still
-  depends on the vendor Docker/toolkit being available locally.
+  passed for SDK LeNet; custom ONNX conversion is next.
 
 The next real milestone is an SSH session to the Radxa Cubie A7Z or target
 Orange Pi board.
@@ -47,8 +47,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\host\prepare-workspace.ps1
 ```
 
 This creates the local working directories and checks whether Docker and the
-expected ACUITY image (`ubuntu-npu:v2.0.10`) are available. It does not download
-anything by default.
+expected ACUITY image (`ubuntu-npu:v2.0.10.1`) are available. It does not
+download anything by default.
 
 When SSH access is available, the host can launch the board smoke test with:
 

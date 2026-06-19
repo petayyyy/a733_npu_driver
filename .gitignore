@@ -1,6 +1,7 @@
 logs/
 models/
 work/
+docker_images*/
 *.log
 *.tmp
 *.nbg
