@@ -1,0 +1,12 @@
+logs/
+models/
+work/
+*.log
+*.tmp
+*.nbg
+*.onnx
+*.bin
+*.data
+*.tar
+*.tar.gz
+*.zip
