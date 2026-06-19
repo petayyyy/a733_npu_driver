@@ -41,7 +41,7 @@ fi
 if [ -n "${A733_VIP_LIB_DIR:-}" ]; then
     export LD_LIBRARY_PATH="${A733_VIP_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 else
-    VIP_LIB_FILE="$(find /usr /opt /lib /root "$PWD" -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' \) 2>/dev/null | head -n 1)"
+    VIP_LIB_FILE="$(find /home/radxa/lib /usr /opt /lib /root "$PWD" -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' \) 2>/dev/null | head -n 1)"
     if [ -n "${VIP_LIB_FILE}" ]; then
         VIP_LIB_DIR="$(dirname "${VIP_LIB_FILE}")"
         export LD_LIBRARY_PATH="${VIP_LIB_DIR}:${LD_LIBRARY_PATH:-}"

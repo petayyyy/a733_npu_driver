@@ -9,13 +9,17 @@
 - Verified host preparation script locally. Docker is installed, but the daemon
   is not running and `ubuntu-npu:v2.0.10` is not present locally.
 - Verified bash syntax for board scripts with Git Bash.
-- Hardware execution is pending SSH access to the board.
+- Connected to Radxa Cubie A7Z at `192.168.31.76`.
+- Gate G0 passed: Debian 11, kernel `5.15.147-21-a733`, 8 cores, thermals
+  readable.
+- Gate G1 passed: `/dev/vipcore` present; VIPLite 2.0.3.2 loaded
+  `yolov8n_6_uint8_a733.nb`; single-image YOLO inference on `dog.jpg` produced
+  bicycle/dog/car detections.
 
 ## Next Gate
 
-G0/G1 on real hardware:
+Phase 2 / ACUITY toolchain:
 
-1. Run `scripts/board/a733-g0-g1-smoke.sh`.
-2. Locate or build `vpm_run`.
-3. Run a vendor CNN/NBG demo.
-4. Capture VIPLite banner and result logs.
+1. Start Docker daemon on host or provide ACUITY image `ubuntu-npu:v2.0.10`.
+2. Convert a known ONNX CNN to NBG with int16 quantization.
+3. Validate converted NBG on the Radxa board.

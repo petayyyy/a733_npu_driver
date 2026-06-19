@@ -2,6 +2,7 @@
 set -u
 
 ROOT_DIR="${A733_LOG_ROOT:-logs/board}"
+SEARCH_DIRS="${A733_SEARCH_DIRS:-/home/radxa/lib /home/radxa/yolo_shm /home/radxa /usr /opt /lib /root $PWD}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 HOST="$(hostname 2>/dev/null || echo board)"
 OUT_DIR="${ROOT_DIR}/${HOST}-${STAMP}"
@@ -59,7 +60,8 @@ find_command() {
         command -v "${cmd}"
         return 0
     fi
-    find /usr /opt /root "$PWD" -type f -name "${cmd}" 2>/dev/null | head -n 1
+    # shellcheck disable=SC2086
+    find ${SEARCH_DIRS} -type f -name "${cmd}" 2>/dev/null | head -n 1
 }
 
 : > "${SUMMARY}"
@@ -112,9 +114,10 @@ if command -v ldconfig >/dev/null 2>&1; then
     run_capture viplite_ldconfig sh -c "ldconfig -p 2>/dev/null | grep -Ei 'VIP|NBG|vsi|awnn|OpenVX' || true" || true
 fi
 
-run_capture viplite_find sh -c "find /usr /opt /lib /root '$PWD' -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' -o -name 'libVIP*.so*' -o -name 'libawnn*' -o -name 'vpm_run' \) 2>/dev/null | sort" || true
+run_capture viplite_find sh -c "find ${SEARCH_DIRS} -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' -o -name 'libVIP*.so*' -o -name 'libawnn*' -o -name 'vpm_run' -o -name '*.nb' -o -name '*.nbg' \) 2>/dev/null | sort" || true
 
-vip_lib_file="$(find /usr /opt /lib /root "$PWD" -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' \) 2>/dev/null | head -n 1)"
+# shellcheck disable=SC2086
+vip_lib_file="$(find ${SEARCH_DIRS} -type f \( -name 'libVIPhal.so*' -o -name 'libNBGlinker.so*' \) 2>/dev/null | head -n 1)"
 if [ -n "${vip_lib_file}" ]; then
     vip_lib_dir="$(dirname "${vip_lib_file}")"
     export LD_LIBRARY_PATH="${vip_lib_dir}:${LD_LIBRARY_PATH:-}"
@@ -159,6 +162,27 @@ if [ -n "${A733_VPM_RUN_ARGS:-}" ] && [ -n "${vpm_run_path}" ] && [ -x "${vpm_ru
     fi
 else
     check_warn g1_vpm_inference "set A733_VPM_RUN_ARGS to run a real NBG inference"
+fi
+
+if [ -n "${A733_NPU_RUN_CMD:-}" ]; then
+    log ""
+    log "### npu_run_cmd"
+    log "+ ${A733_NPU_RUN_CMD}"
+    sh -c "${A733_NPU_RUN_CMD}" > "${OUT_DIR}/npu_run_cmd.out" 2> "${OUT_DIR}/npu_run_cmd.err"
+    status=$?
+    cat "${OUT_DIR}/npu_run_cmd.out" >> "${OUT_DIR}/smoke.log"
+    cat "${OUT_DIR}/npu_run_cmd.err" >> "${OUT_DIR}/smoke.log"
+    log "exit=${status}"
+    if [ "${status}" -eq 0 ]; then
+        check_pass g1_npu_inference "custom NPU command completed"
+    else
+        check_fail g1_npu_inference "custom NPU command failed with exit ${status}"
+    fi
+    if grep -Eiq 'VIPLite|vipcore|detection num|create network|prepare network|0x1000003b|cid=0x1000003b' "${OUT_DIR}/npu_run_cmd.out" "${OUT_DIR}/npu_run_cmd.err"; then
+        check_pass g1_npu_banner "NPU/VIPLite evidence found in custom command logs"
+    else
+        check_warn g1_npu_banner "NPU/VIPLite evidence not found in custom command logs"
+    fi
 fi
 
 if command -v dmesg >/dev/null 2>&1; then

@@ -30,6 +30,7 @@ scripts/
   host/
     prepare-workspace.ps1  Create local host workspace and check Docker image
     run-board-smoke.ps1    Copy board scripts over SSH and run G0/G1 smoke test
+    ssh_exec.py            Password-based SSH/SFTP helper for automation
 reports/
   status.md                Living status log
 ```
@@ -76,6 +77,14 @@ package:
 
 ```bash
 A733_VPM_RUN_ARGS="<vendor vpm_run arguments>" scripts/board/a733-g0-g1-smoke.sh
+```
+
+For boards that have a custom sample instead of `vpm_run`, use
+`A733_NPU_RUN_CMD`:
+
+```bash
+A733_NPU_RUN_CMD='cd /home/radxa/yolo_shm && export LD_LIBRARY_PATH=/home/radxa/lib:$LD_LIBRARY_PATH && ./build/test_npu_a733 -nb yolov8n_6_uint8_a733.nb -i dog.jpg' \
+  scripts/board/a733-g0-g1-smoke.sh
 ```
 
 The script writes logs under `logs/board/<host>-<timestamp>/` and summarizes
