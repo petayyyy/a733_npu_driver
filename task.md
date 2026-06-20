@@ -1,9 +1,26 @@
 # NPU Inference of LLMs/VLMs on the Allwinner A733 (Vivante VIP9000): Methodology Guide, Roadmap, and Agent Work Breakdown
 
+## Active User Requirement Override - 2026-06-20
+
+The active goal is NPU-only LLM/VLM execution on the A733 VIP9000. The LLM and
+VLM model-layer compute must run on the NPU, not on the CPU. CPU-side decoder
+paths such as llama.cpp are allowed only as diagnostic baselines or tooling and
+do not satisfy the project goal.
+
+This override supersedes the older hybrid recommendation below. The current
+execution roadmap is to prove fixed-shape transformer decoder blocks, then a
+tiny language model, then a VLM path on the NPU through ACUITY/VIPLite or a
+documented NPU compiler/runtime alternative.
+
+Current progress: the fixed-shape transformer decoder-block subgate is now
+validated on the A733 NPU. The next accepted target is a tiny fixed-shape NPU
+language model with token embeddings, decoder compute, and logits in the NBG
+graph.
+
 ## TL;DR
 - **Getting a small CNN/vision model running on the A733 NPU is "almost certainly achievable" today** — the vendor VIPLite 2.0 / ACUITY (NBG) stack already runs ResNet50, YOLOv5/v8/v11 and YOLACT on the Vivante VIP9000 via `/dev/vipcore` on Radxa's Debian image; this is the realistic proof-of-principle target. **Running a full LLM/VLM *on the NPU* is "research risk," not a turnkey path:** there is no RKLLM-equivalent for Allwinner, the public ACUITY toolkit exposes only uint8/int16/bf16/pcq (int8 per-channel) quantization (no INT4), NBG graphs are static-shape (no dynamic KV-cache), and no one has demonstrated a transformer decoder on any VIP9000-class NPU via the public stack.
 - **The hardware is severely memory-bound for decode.** The A733 has a 32-bit LPDDR5 bus; on the final-target Orange Pi Zero 3W (LPDDR5 @ 4800 MT/s ≈ 19.2 GB/s theoretical) a w4 0.5–1.5B model is ceiling-bound to roughly single-digit-to-low-double-digit tokens/s even in the best case, and the Radxa Cubie A7Z dev board's slower measured memory profile is worse. The 3 TOPS INT8 rating is not the bottleneck — bandwidth is.
-- **Recommended strategy: a hybrid pipeline.** Put the VLM vision encoder (a CNN/ViT, static-shape) on the NPU via ACUITY/VIPLite — this is where the NPU genuinely helps — and run the LLM decoder on the A76 CPU cores with llama.cpp (q4_0/q4_K). Treat "LLM decode fully on NPU" as an R&D track via TVM-BYOC (VeriSilicon's `vsi_npu`) or etnaviv, not as the primary deliverable.
+- **Active strategy after the user override: NPU-only LLM/VLM model-layer compute.** The earlier hybrid recommendation is superseded. Use ACUITY/VIPLite or a documented NPU compiler/runtime alternative to move fixed-shape transformer decoder blocks, token embedding handling, logits, VLM projector/adapter, and vision encoder compute onto the A733 NPU. CPU work is limited to orchestration, data movement, tokenization/detokenization until replaced, and validation.
 
 ## Key Findings
 
@@ -51,14 +68,14 @@
 - **Other Vivante platforms:** NXP i.MX 8M Plus uses the same VIP9000 family with NXP's VX Delegate (CNN only); NXP's LLM/4-bit support is on newer i.MX 9xx Neutron NPUs, not the Vivante part.
 
 ### 5. Models, Quantization, Compilation — recommendation
-- **LLM shortlist (CPU decode via llama.cpp; NPU optional for prefill GEMMs):** Qwen2.5-0.5B-Instruct (best fit), SmolLM2-360M/1.7B, TinyLlama-1.1B, Qwen2.5-1.5B-Instruct; Phi-3-mini-3.8B as the upper bound (memory-heavy, slow). Rationale: w4 weights fit in ~0.3–2.2 GB; A76 cores handle decode at usable-if-modest rates.
-- **VLM shortlist (hybrid):** SmolVLM-256M/500M, nanoLLaVA (~1B), Qwen2-VL-2B. Pattern: **vision encoder (SigLIP/ViT) → NPU (static shape, NBG)**; projector → NPU or CPU; **LLM decoder → CPU**. This is the most defensible use of the NPU.
-- **CPU-fallback strategy:** run RoPE, RMSNorm, softmax, and KV-cache management on CPU (llama.cpp already does this efficiently); reserve NPU for the large static GEMMs (vision encoder; optionally prefill). Use **int16** quantization for NPU CNNs — Frigate showed uint8 dropped a real-scene detection from ~0.80 to ~0.50 confidence, while int16 keeps near-float accuracy.
+- **LLM shortlist for NPU-only probes:** start with tiny deterministic fixed-shape graphs, then a very small language model where embeddings, decoder block compute, and logits live in the NBG graph. Only after that, scale toward Qwen2.5-0.5B, SmolLM2-360M/1.7B, TinyLlama-1.1B, or Qwen2.5-1.5B if the static-shape ACUITY/VIPLite path remains viable.
+- **VLM shortlist for NPU-only probes:** MobileCLIP-S0/SigLIP-style static vision encoder first, then projector/adapter on NPU, then NPU language decoder graph. The CPU decoder variant is historical context only and is not a deliverable.
+- **CPU-support strategy:** CPU may perform file I/O, runtime launching, tokenization/detokenization until an NPU-side replacement exists, and validation. It must not execute LLM/VLM model layers for accepted gates. Use **int16** quantization for NPU graphs when accuracy matters — Frigate showed uint8 dropped a real-scene detection from ~0.80 to ~0.50 confidence, while int16 keeps near-float accuracy.
 - **GPU offload:** the IMG BXM-4-64 supports OpenCL 3.0 and llama.cpp has an OpenCL backend, but integrated-GPU bandwidth-sharing usually yields little over CPU on such SoCs — treat as experimental.
 
 ### 6. Runtime and Integration — recommendation
-- **Engine options:** (a) vendor **awnn/VIPLite** + ACUITY NBG export — best for the vision encoder; (b) **TIM-VX-backed TFLite** delegate or **TVM-BYOC `vsi_npu`** — for custom op graphs; (c) **llama.cpp / MNN / ncnn** — CPU decode; (d) **etnaviv/Teflon** — mainline CNN offload.
-- **E2E VLM pipeline:** image → preprocess (CPU/GPU) → ViT encoder NBG on NPU → projector → token embeddings → llama.cpp decoder on CPU → stream tokens.
+- **Engine options:** (a) vendor **awnn/VIPLite** + ACUITY NBG export; (b) **TIM-VX-backed TFLite** delegate or **TVM-BYOC `vsi_npu`** for custom op graphs; (c) llama.cpp only as a historical CPU baseline and prompt/tokenization reference, not as the target decoder.
+- **E2E VLM pipeline target:** image preprocess and token I/O may start on CPU, but ViT encoder, projector/adapter, decoder block compute, and logits must execute as NPU graphs.
 - **Benchmark plan:** measure prefill tok/s, decode tok/s, first-token latency, peak RSS, watts (USB power meter), and accuracy vs a CPU-only baseline; record the NPU-vs-CPU split per pipeline stage.
 
 ## Details: Menu of Goals (achievability tiers)
@@ -66,23 +83,23 @@
 | Tier | Goal | Evidence basis | Recommendation |
 |---|---|---|---|
 | **A — Almost certain** | Run a small CNN (ResNet50/MobileNet/YOLOv8n) on the NPU via VIPLite/awnn on Debian; verify `/dev/vipcore`, NBG inference | Vendor docs + Frigate community success (~25–60 ms) | **Do this first — proof of principle** |
-| **B — High confidence** | NPU-accelerated VLM **vision encoder** (ViT/SigLIP, static shape) + CPU LLM decoder (llama.cpp) | ACUITY supports CNN/ViT; llama.cpp runs on A76 | **Primary deliverable** |
-| **C — Plausible R&D** | Partial LLM **prefill** GEMMs on NPU via TVM-BYOC `vsi_npu`; decode on CPU | TVM `vsi_npu` fork exists; ops composable | Stretch goal |
-| **D — Research risk** | Full LLM **decode** on NPU (dynamic KV-cache, RoPE, RMSNorm, INT4) | No precedent on VIP9000; NBG static-shape; no INT4 in toolkit | Only with vendor support or heavy RE |
+| **B — Active target** | Fixed-shape transformer decoder block and tiny language model on NPU | ACUITY accepted MatMul, Softmax, GELU, LayerNorm-style reductions, attention, and logits in a tiny NBG | **Primary deliverable path** |
+| **C — Active VLM target** | Vision encoder + projector/adapter + decoder graph on NPU | MobileCLIP-S0 vision encoder already runs on NPU; decoder-block subgate now passes | Build next |
+| **D — Research risk** | Larger LLM/VLM decode on NPU with useful context handling | No public LLM runtime on VIP9000; NBG static-shape; no public INT4 path | Requires static graph compromises, vendor support, or alternate compiler/runtime |
 
 ## Phased Roadmap with Gates and Dependency Graph
 
 **Dependency graph (linear with a fork at Phase 3):**
 ```
-P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a (VLM hybrid, MAIN) → P4 (opt) → P5 (port) → P6 (bench)
+P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a (NPU-only LLM/VLM, MAIN) → P4 (opt) → P5 (port) → P6 (bench)
                                                               └→ P3b (LLM-on-NPU R&D, optional, time-boxed)
 ```
 
 - **Phase 0 — Environment (Radxa Cubie A7Z, in hand).** Flash Debian 11 rsdk-r6; confirm boot, A76 governors, thermals. **Gate G0:** board boots; `/proc/cpuinfo` shows 8 cores; thermals stable.
 - **Phase 1 — NPU bring-up (CNN PoP).** Verify `/dev/vipcore`; build `ai-sdk` (`AI_SDK_PLATFORM=a733 NPU_SW_VERSION=v2.0`); run `vpm_run` + ResNet50/YOLOv8n NBG. **Gate G1:** NPU inference confirmed (driver banner `cid=0x1000003B`; correct top-5 / detections). *This is the user's #1 success criterion.*
 - **Phase 2 — Toolchain.** Stand up ACUITY Docker (`ubuntu-npu:v2.0.10`) on x86; convert a custom ONNX CNN → NBG (int16, NPU_VERSION=v3); run on board. **Gate G2:** custom model converts + runs; accuracy within tolerance vs ONNX (use int16, not uint8).
-- **Phase 3a — VLM hybrid (primary).** Export a small ViT vision encoder to NBG; run on NPU; wire to a llama.cpp CPU decoder (SmolVLM/nanoLLaVA-class). **Gate G3a:** end-to-end image→text answer; per-stage timings captured.
-- **Phase 3b — LLM-on-NPU R&D (optional, time-boxed).** Attempt TVM-BYOC `vsi_npu` to offload prefill GEMMs of Qwen2.5-0.5B; decode on CPU. **Gate G3b:** any transformer op verified on NPU **OR** a documented blocker for vendor escalation.
+- **Phase 3a — NPU-only LLM/VLM path (primary).** Export fixed-shape transformer decoder blocks to NBG; run them on NPU; extend to a tiny language model with embeddings, decoder compute, and logits on NPU; then add MobileCLIP-S0 encoder/projector/decoder VLM pieces on NPU. **Gate G3a:** model-layer compute runs on NPU, outputs match host ACUITY within tolerance, and per-stage timings are captured.
+- **Phase 3b — LLM-on-NPU R&D (optional, time-boxed).** Attempt TIM-VX/TVM-BYOC `vsi_npu` or another documented path only if ACUITY/VIPLite blocks the required static decoder graphs. **Gate G3b:** any missing transformer op/subgraph is verified on NPU **OR** a documented blocker is ready for vendor escalation.
 - **Phase 4 — Optimization.** Quantization tuning (int16 vs pcq), SRAM caching, CPU thread pinning to A76, fixed-frequency governor. **Gate G4:** ≥20% latency improvement vs naive run.
 - **Phase 5 — PORTING to Orange Pi Zero 3W (final target).** Reflash to Orange Pi official image 1.0.4 / kernel 6.1.31 / bookworm. Reuse NBG files as-is; obtain Orange Pi's NPU KMD + VIPLite from its BSP; **recompile** awnn/llama.cpp apps against bookworm glibc; confirm `/dev/vipcore` device-tree/overlay. **Gate G5:** identical NBG runs on Orange Pi NPU; outputs match Radxa within tolerance. *Transfers as-is:* NBG models, ACUITY workflow, architecture. *Rebuilds:* kernel NPU module (from OPi BSP), C++ binaries (bookworm), DT/overlay.
 - **Phase 6 — Benchmark & docs.** Full benchmark matrix on both boards; publish methodology. **Gate G6:** reproducible numbers + writeup.
@@ -92,7 +109,7 @@ P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | NPU driver / `npu-runtime` absent or broken on a given image | Med | High | Prefer Radxa rsdk-r6 (known-good); local-build ai-sdk; vpm_run smoke test gate |
-| LLM decode infeasible on NPU (static shape, no INT4) | High | High (only if goal D) | Pivot to hybrid (vision on NPU, decode on CPU); set goal B as deliverable |
+| LLM decode infeasible on NPU (static shape, no INT4) | High | High | Reduce to smaller/fixed-shape NPU graphs, try alternate compiler/runtime paths, or document blocker for vendor escalation |
 | Memory bandwidth caps decode to low single digits | High | Med | Use 0.5–1.5B w4 models; manage expectations; pin to A76 |
 | Orange Pi 6.1.31 NPU KMD incompatible with Radxa-sourced VIPLite | Med | Med | Source KMD + `.so` from the Orange Pi BSP specifically; recompile userspace on bookworm |
 | ACUITY uint8 accuracy loss | Med | Med | Use int16 (Frigate-proven); calibrate with representative dataset |
@@ -118,7 +135,7 @@ P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a 
 > Mission: Nail down the A733 memory subsystem and compute memory-bound decode ceilings for 0.5/1.1/1.5/3B at w4/w8, ctx 512/2048, for both boards. Search: A733 datasheet (DRAM section), Radxa/Orange Pi specs, board reviews for measured MT/s. Deliver: a tok/s + RAM table with stated assumptions and efficiency factor. Success: numbers reconcilable with RK3588/RK3576 baselines.
 
 **R5 — Models & Quantization Analyst**
-> Mission: Finalize the LLM/VLM shortlist with memory/op justification and a hybrid NPU+CPU op-placement plan. Search: HF model cards (Qwen2.5-0.5B/1.5B, SmolLM2, TinyLlama, SmolVLM, nanoLLaVA), llama.cpp quant docs. Deliver: a ranked model table (params, w4 size, KV size @512/2048, NPU-able layers) + a placement plan. Success: every model fits a stated RAM budget.
+> Mission: Finalize the LLM/VLM shortlist with memory/op justification and an NPU-only model-layer placement plan. Search: HF model cards (Qwen2.5-0.5B/1.5B, SmolLM2, TinyLlama, SmolVLM, nanoLLaVA), ACUITY/VIPLite constraints, and static-shape decoder strategies. Deliver: a ranked model table (params, candidate precision, static graph feasibility, NPU-able layers) + a placement plan. Success: every accepted model-layer stage is assigned to NPU or explicitly blocked.
 
 ### Implementation agents (executor-style, Claude Code/CLI)
 
@@ -128,8 +145,8 @@ P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a 
 **I2 — ACUITY Conversion Engineer (x86 host)**
 > Mission: Stand up ACUITY Docker `ubuntu-npu:v2.0.10`; convert a custom ONNX CNN and a small ViT vision encoder to NBG (int16, NPU_VERSION=v3); validate via pegasus_inference + on-board vpm_run. Deliver: reproducible conversion scripts + an accuracy report. Success = Gate G2.
 
-**I3 — Hybrid VLM/LLM Integration Engineer**
-> Mission: Build the e2e hybrid pipeline — ViT encoder NBG on NPU + llama.cpp CPU decoder (start with Qwen2.5-0.5B / SmolVLM). Build llama.cpp for aarch64 (optionally OpenCL on BXM); wire vision features to the decoder; pin to A76. Deliver: a working image→text demo + per-stage timings. Success = Gate G3a.
+**I3 — NPU-Only VLM/LLM Integration Engineer**
+> Mission: Build the e2e NPU-only model-layer pipeline. Start from a tiny fixed-shape NPU language model, then connect ViT/MobileCLIP encoder NBG, projector/adapter NBG, and decoder/logits NBG. CPU may orchestrate data movement and token I/O only. Deliver: working NPU graph stages + per-stage timings. Success = Gate G3a.
 
 **I4 — Porting & Benchmark Engineer (Orange Pi Zero 3W)**
 > Mission: Port to Orange Pi official image 1.0.4 / kernel 6.1.31 / bookworm; reuse NBG models; source NPU KMD + VIPLite from the OPi BSP; recompile userspace; run the full benchmark matrix (prefill/decode tok/s, latency, RAM, watts, accuracy) on both boards. Deliver: a comparison report. Success = Gates G5 + G6.

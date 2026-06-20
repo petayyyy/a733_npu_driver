@@ -42,23 +42,34 @@
   - Runtime: `profile inference time` about `22.6ms`, `vpm run ret=0`.
   - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
     diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
-- Phase 3a CPU decoder subgate passed: llama.cpp built on the Radxa board at
+- Historical CPU baseline recorded: llama.cpp built on the Radxa board at
   commit `f449e0553708b895adbd94a301431cef691f632d`, and
   `SmolLM2-135M-Instruct-Q4_K_M.gguf` ran through CPU-only GGUF inference.
+  This is no longer considered a project gate or deliverable because the active
+  requirement is NPU-only LLM/VLM model-layer compute.
   - Model: `134.52M` params, `98.87 MiB` in llama-bench, Q4_K_M.
   - llama-bench, CPU-only: best decode for this model was `56.74 tok/s` at
     2 threads; best prompt throughput was `122.57 tok/s` at 8 threads.
   - llama-simple chat prompt smoke: prompt eval `46.93 tok/s`, decode eval
     `29.92 tok/s`, total `2515.07 ms / 64 tokens`.
+- Active requirement correction from user: all LLM/VLM model-layer compute must
+  run on the A733 NPU. CPU decode is not acceptable as the target path.
+- NPU-only decoder-block subgate passed: generated a deterministic tiny
+  fixed-shape transformer decoder block ONNX, exported it through ACUITY
+  `ubuntu-npu:v2.0.10.1` to an int16 A733 NBG, and validated it on the Radxa
+  through `vpm_run`.
+  - NBG size: `85,144` bytes.
+  - Input/output: `1x4x8` float16 embedding tensor to `1x4x16` logits tensor.
+  - Runtime: `profile inference time` between `59us` and `68us`,
+    `vpm run ret=0`.
+  - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+    diff `0.000549316`, mean abs diff `0.000133514`, cosine `0.999999919`.
 
 ## Next Gate
 
-Phase 3a / hybrid VLM path:
+Phase 3a / NPU-only LLM/VLM path:
 
-1. Select the first image-to-text target pairing for the MobileCLIP-S0
-   embedding path.
-2. Wire encoder output transfer and decoder input plumbing.
-3. Add or source the projector/adapter needed between `1x512` image embeddings
-   and the selected decoder.
-4. Capture end-to-end timing for image preprocess, NPU encoder, projector, and
-   CPU decode.
+1. Extend to a tiny NPU language model that includes token embedding handling,
+   decoder compute, and logits in the NBG graph.
+2. Add the VLM pieces on NPU: MobileCLIP-S0 encoder, projector/adapter, and NPU
+   language decoder graph.

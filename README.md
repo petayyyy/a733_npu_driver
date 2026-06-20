@@ -2,8 +2,9 @@
 
 This repository tracks the practical work from `task.md`: bring up the
 Allwinner A733 Vivante VIP9000 NPU, prove CNN inference first, then move toward
-a hybrid VLM pipeline where the vision encoder runs on the NPU and the LLM
-decoder runs on CPU.
+LLM/VLM execution where model-layer compute runs on the NPU. The active project
+constraint is NPU-only LLM/VLM inference; CPU execution is allowed only for
+orchestration, validation, and other non-inference support work.
 
 ## Current Status
 
@@ -12,28 +13,33 @@ decoder runs on CPU.
   `vpm_run` all confirm the A733 VIP9000 path.
 - Phase 2 / G2: passed for SDK LeNet and ONNX Inception v1 in both uint8 and
   int16 through ACUITY Docker `ubuntu-npu:v2.0.10.1`.
-- Phase 3a: vision encoder NPU subgate and CPU decoder subgate passed. A tiny
-  CLIP-like probe and a real MobileCLIP-S0 static vision encoder were exported
-  to int16 NBG and validated on the A733 NPU; llama.cpp also builds and runs a
-  small GGUF decoder on the Radxa CPU.
+- Phase 3a: NPU-only path is active. A tiny CLIP-like probe and a real
+  MobileCLIP-S0 static vision encoder were exported to int16 NBG and validated
+  on the A733 NPU. A tiny fixed-shape transformer decoder block was also
+  exported to int16 NBG and validated on the A733 NPU, including attention,
+  Softmax, GELU, LayerNorm-style reductions, residuals, and logits output. The
+  previous CPU llama.cpp decoder result is retained only as a diagnostic
+  baseline and is not a project deliverable.
 
-The next milestone is bridging the MobileCLIP-S0 embedding output into a
-compatible CPU-side decoder path for an end-to-end hybrid VLM demo.
+The next milestone is a tiny fixed-shape NPU language model that includes token
+embedding handling, decoder compute, and logits through VIPLite.
 
 ## Repository Layout
 
 ```text
 docs/
   hardware-access.md       SSH handoff checklist and board requirements
+  npu-only-requirement.md  Active hard requirement for NPU-only LLM/VLM work
   roadmap.md               Gate-by-gate execution plan
 scripts/
   board/
     a733-g0-g1-smoke.sh    Board diagnostics and NPU smoke-test collector
     build-ai-sdk.sh        Build helper for an already cloned ai-sdk tree
-    build-llama-cpp.sh     Build selected llama.cpp CPU decoder targets
-    run-llama-decode.sh    Run llama.cpp CPU decoder smoke and bench
+    build-llama-cpp.sh     Historical CPU baseline helper, not a deliverable
+    run-llama-decode.sh    Historical CPU baseline helper, not a deliverable
     run-vpm.sh             Logged wrapper around vpm_run
   host/
+    make_tiny_decoder_block_onnx.py Generate fixed-shape decoder-block ONNX probe
     prepare-workspace.ps1  Create local host workspace and check Docker image
     run-board-smoke.ps1    Copy board scripts over SSH and run G0/G1 smoke test
     ssh_exec.py            Password-based SSH/SFTP helper for automation
@@ -44,7 +50,8 @@ reports/
   g2-acuity-inception-v1.md ACUITY ONNX Inception validation report
   g3a-clip-tiny-vision.md  Tiny CLIP vision-encoder NPU probe
   g3a-mobileclip-s0-vision.md MobileCLIP-S0 vision-encoder NPU validation
-  g3a-llama-cpp-decoder.md llama.cpp CPU decoder validation
+  g3a-tiny-decoder-block-npu.md Tiny transformer decoder block NPU validation
+  g3a-llama-cpp-decoder.md Historical CPU baseline, not a deliverable
 ```
 
 Generated board logs, host logs, models, and temporary workspaces are ignored by

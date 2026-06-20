@@ -182,5 +182,6 @@ the Radxa Cubie A7Z VIP9000 through `/dev/vipcore`, identify the expected
 
 ## Next Step
 
-Move into Phase 3a: select and export a small static vision encoder candidate
-for the hybrid VLM path, then pair it with a CPU-side llama.cpp decoder.
+Move into Phase 3a: select and export transformer/VLM components for the
+NPU-only path, starting with a static vision encoder and then an NPU-side
+decoder block.

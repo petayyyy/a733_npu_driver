@@ -9,7 +9,8 @@ The goal was to validate that ACUITY can import, quantize, export, and run a
 semantically useful static CLIP-style vision encoder on the A733 VIP9000 NPU.
 
 This is still not an end-to-end VLM demo. The remaining Phase 3a work is to
-connect the NPU-produced image embedding to a CPU-side decoder path.
+connect the NPU-produced image embedding to an NPU-side projector and language
+decoder path.
 
 ## Source Model
 
@@ -47,7 +48,7 @@ The ONNX vision graph contains both CNN-style and transformer-style operators:
 
 This makes it a more useful Phase 3a target than the random tiny CLIP probe:
 the encoder is real, static, and compact, while still exercising transformer
-subgraphs that matter for a hybrid VLM pipeline.
+subgraphs that matter for the NPU-only VLM path.
 
 ## ACUITY Setup
 
@@ -177,5 +178,6 @@ MobileCLIP-S0 encoder: ACUITY exported the graph to an int16 A733 NBG, VIPLite
 executed it on the real VIP9000 NPU, and the `1x512` embedding matches the
 host-side int16 inference within a tight tolerance.
 
-G3a is not complete yet. The remaining work is CPU-side decoder bring-up and
-integration of this embedding output into an end-to-end image-to-text path.
+G3a is not complete yet. The remaining work is NPU-side projector/decoder
+bring-up and integration of this embedding output into an end-to-end
+image-to-text path.

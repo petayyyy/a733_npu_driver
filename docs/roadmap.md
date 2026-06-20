@@ -3,6 +3,12 @@
 This is the execution version of the roadmap in `task.md`. Gates are written so
 they can be checked from logs.
 
+## Active Constraint - NPU-Only LLM/VLM
+
+The active user requirement is that LLM/VLM model-layer compute must run on the
+A733 NPU. CPU decoder paths are diagnostic baselines only and do not satisfy any
+LLM/VLM gate. See `docs/npu-only-requirement.md`.
+
 ## Phase 0 - Environment
 
 Goal: prove the board is usable before touching the NPU stack.
@@ -71,20 +77,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\host\prepare-workspace.ps1 `
   -AcuityImage ubuntu-npu:v2.0.10.1
 ```
 
-## Phase 3a - Hybrid VLM Path
+## Phase 3a - NPU-Only Transformer Path
 
-Goal: put the static vision encoder on NPU and keep autoregressive decode on
-CPU.
+Goal: prove that transformer decoder compute can run on the A733 VIP9000 NPU,
+then extend the result into a tiny NPU language model and NPU VLM path.
 
 Gate G3a:
 
-- Small ViT/SigLIP-like encoder exported to NBG.
-- Encoder inference runs on NPU.
-- llama.cpp CPU decoder runs on A76 cores.
-- End-to-end image-to-text response works.
+- Fixed-shape transformer decoder block exports to NBG.
+- Decoder block runs on NPU and produces expected output/logits.
+- Tiny fixed-shape language model runs on NPU.
+- VLM path runs model-layer compute on NPU: vision encoder, projector/adapter,
+  and language decoder graph.
 - Per-stage timing is captured.
 
-Current status: vision encoder NPU subgate and CPU decoder subgate passed.
+Current status: vision encoder NPU subgate passed; CPU decoder result is
+historical baseline only and is no longer a target gate.
 
 The first compatibility probe passed. The tiny random CLIP vision ONNX from
 `hf-internal-testing/tiny-random-CLIPModel` was fixed to `1x3x30x30`, quantized
@@ -107,9 +115,27 @@ exported to NBG, and run on the A733:
   diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
 
 This completed the static vision-encoder NPU proof and established the encoder
-side of the hybrid path.
+side of the NPU-only VLM path.
 
-The CPU decoder subgate also passed. llama.cpp built on the Radxa board at
+The first decoder-block NPU subgate also succeeded. A deterministic tiny
+fixed-shape transformer decoder block was generated as ONNX, quantized/exported
+through ACUITY to int16 NBG, and run on the A733:
+
+- NBG size: `85,144` bytes.
+- Input: `1x4x8` float16 embedding tensor.
+- Output: `1x4x16` logits tensor, int16 dynamic fixed point `dfp=14`.
+- Runtime: `profile inference time` between `59us` and `68us`,
+  `vpm run ret=0`.
+- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+  diff `0.000549316`, mean abs diff `0.000133514`, cosine `0.999999919`.
+- Covered decoder ops include MatMul, Softmax, GELU, LayerNorm-style
+  reductions, causal attention, residuals, and logits projection.
+
+This proves a static transformer decoder block can execute on the VIP9000 NPU.
+The next G3a gate is a tiny fixed-shape NPU language model with token embedding
+handling, decoder compute, and logits in the NBG graph.
+
+Historical CPU baseline: llama.cpp built on the Radxa board at
 commit `f449e0553708b895adbd94a301431cef691f632d`; the separate
 `llama-simple`, `llama-simple-chat`, and `llama-bench` targets were used because
 the current upstream unified `llama-app` target did not link in this
@@ -121,8 +147,7 @@ configuration. `SmolLM2-135M-Instruct-Q4_K_M.gguf` ran CPU-only:
 - Generation smoke via `llama-simple`: prompt eval `46.93 tok/s`, decode eval
   `29.92 tok/s`, total `2515.07 ms / 64 tokens`.
 
-This still does not complete G3a; the remaining gate item is the actual
-image-to-text integration between the NPU encoder output and CPU decoder path.
+This CPU result does not complete G3a and is not a deliverable.
 
 ## Phase 3b - LLM-on-NPU R&D
 

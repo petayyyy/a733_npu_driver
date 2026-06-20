@@ -166,5 +166,5 @@ CLIP-like graph: ACUITY can compile transformer-style vision blocks to A733 NBG,
 and VIPLite can run the generated graph on the real VIP9000 NPU.
 
 G3a is not complete yet. The remaining work is to repeat this with a real small
-vision encoder and wire its embedding output to a CPU-side llama.cpp decoder for
-an end-to-end image-to-text path.
+vision encoder and wire its embedding output to an NPU-side projector and
+language decoder for an end-to-end image-to-text path.

@@ -1,16 +1,22 @@
-# Phase 3a Report - llama.cpp CPU Decoder Bring-up
+# Historical Report - llama.cpp CPU Decoder Baseline
 
 Date: 2026-06-20 local / 2026-06-20 UTC
 
+## Superseded Status
+
+This report is retained as a historical CPU diagnostic baseline only. It does
+not satisfy the active project requirement. The current user requirement is that
+LLM/VLM model-layer compute must run on the A733 NPU, not on the CPU.
+
 ## Purpose
 
-This report validates the CPU-side decoder half of the Phase 3a hybrid VLM
-plan. The NPU vision-encoder subgate is already proven with MobileCLIP-S0; this
-step checks that a small GGUF language model can be built and run through
-llama.cpp on the Radxa Cubie A7Z CPU cores.
+This historical report recorded an earlier CPU-side decoder experiment. The NPU
+vision-encoder subgate is already proven with MobileCLIP-S0; this step only
+checks that a small GGUF language model can be built and run through llama.cpp
+on the Radxa Cubie A7Z CPU cores.
 
-This is not yet an end-to-end image-to-text pipeline. It proves the decoder
-runtime and records first CPU throughput numbers.
+This is not an accepted end-to-end image-to-text pipeline. It records a CPU
+runtime baseline for diagnostics only.
 
 ## Board Environment
 
