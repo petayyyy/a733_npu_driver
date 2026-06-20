@@ -110,9 +110,10 @@ Gate G3a decoder-block subgate passed: a transformer decoder block with
 attention, Softmax, GELU, LayerNorm-style reductions, residuals, and logits
 projection was compiled to an A733 NBG and validated on the VIP9000 NPU.
 
-This does not yet complete the LLM target. The next gate is a tiny fixed-shape
-language model where token embeddings, decoder compute, and logits are all in
-the NPU graph.
+This did not by itself complete the LLM target because token embedding lookup
+was still outside the graph. The follow-up tiny LM `Gather` report validates
+that next subgate with token IDs, embedding lookup, decoder compute, and logits
+all inside the NPU graph.
 
 ## Raw Logs
 

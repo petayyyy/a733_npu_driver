@@ -64,12 +64,23 @@
     `vpm run ret=0`.
   - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
     diff `0.000549316`, mean abs diff `0.000133514`, cosine `0.999999919`.
+- NPU-only tiny language-model subgate passed: generated a deterministic
+  fixed-shape LM ONNX with int32 token IDs, ONNX `Gather` token embeddings,
+  position embeddings, decoder compute, and logits, then exported it through
+  ACUITY to an int16 A733 NBG and validated it on the Radxa through `vpm_run`.
+  - NBG size: `87,016` bytes.
+  - Input/output: `1x4` int32 tokens (`1 5 9 2`) to `1x4x16` logits.
+  - Runtime: `profile inference time` between `62us` and `71us`,
+    `vpm run ret=0`.
+  - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+    diff `0.000610352`, mean abs diff `0.000153542`, cosine `0.999999929`.
 
 ## Next Gate
 
 Phase 3a / NPU-only LLM/VLM path:
 
-1. Extend to a tiny NPU language model that includes token embedding handling,
-   decoder compute, and logits in the NBG graph.
-2. Add the VLM pieces on NPU: MobileCLIP-S0 encoder, projector/adapter, and NPU
+1. Add the VLM pieces on NPU: MobileCLIP-S0 encoder, projector/adapter, and NPU
    language decoder graph.
+2. Scale the fixed-shape language path into a decode loop where CPU only
+   updates token IDs and postprocesses logits, while every model-layer
+   evaluation stays on NPU.

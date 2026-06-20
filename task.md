@@ -12,10 +12,11 @@ execution roadmap is to prove fixed-shape transformer decoder blocks, then a
 tiny language model, then a VLM path on the NPU through ACUITY/VIPLite or a
 documented NPU compiler/runtime alternative.
 
-Current progress: the fixed-shape transformer decoder-block subgate is now
-validated on the A733 NPU. The next accepted target is a tiny fixed-shape NPU
-language model with token embeddings, decoder compute, and logits in the NBG
-graph.
+Current progress: the fixed-shape transformer decoder-block subgate and the
+tiny fixed-shape language-model subgate are validated on the A733 NPU. The LM
+graph accepts int32 token IDs and runs embedding `Gather`, decoder compute, and
+logits in the NBG graph. The next accepted target is NPU-side VLM integration:
+MobileCLIP-S0 encoder output, projector/adapter, and NPU language decoder path.
 
 ## TL;DR
 - **Getting a small CNN/vision model running on the A733 NPU is "almost certainly achievable" today** — the vendor VIPLite 2.0 / ACUITY (NBG) stack already runs ResNet50, YOLOv5/v8/v11 and YOLACT on the Vivante VIP9000 via `/dev/vipcore` on Radxa's Debian image; this is the realistic proof-of-principle target. **Running a full LLM/VLM *on the NPU* is "research risk," not a turnkey path:** there is no RKLLM-equivalent for Allwinner, the public ACUITY toolkit exposes only uint8/int16/bf16/pcq (int8 per-channel) quantization (no INT4), NBG graphs are static-shape (no dynamic KV-cache), and no one has demonstrated a transformer decoder on any VIP9000-class NPU via the public stack.
@@ -98,7 +99,7 @@ P0 (env) → P1 (NPU bring-up, CNN) → P2 (toolchain/ACUITY) → P3 ┬→ P3a 
 - **Phase 0 — Environment (Radxa Cubie A7Z, in hand).** Flash Debian 11 rsdk-r6; confirm boot, A76 governors, thermals. **Gate G0:** board boots; `/proc/cpuinfo` shows 8 cores; thermals stable.
 - **Phase 1 — NPU bring-up (CNN PoP).** Verify `/dev/vipcore`; build `ai-sdk` (`AI_SDK_PLATFORM=a733 NPU_SW_VERSION=v2.0`); run `vpm_run` + ResNet50/YOLOv8n NBG. **Gate G1:** NPU inference confirmed (driver banner `cid=0x1000003B`; correct top-5 / detections). *This is the user's #1 success criterion.*
 - **Phase 2 — Toolchain.** Stand up ACUITY Docker (`ubuntu-npu:v2.0.10`) on x86; convert a custom ONNX CNN → NBG (int16, NPU_VERSION=v3); run on board. **Gate G2:** custom model converts + runs; accuracy within tolerance vs ONNX (use int16, not uint8).
-- **Phase 3a — NPU-only LLM/VLM path (primary).** Export fixed-shape transformer decoder blocks to NBG; run them on NPU; extend to a tiny language model with embeddings, decoder compute, and logits on NPU; then add MobileCLIP-S0 encoder/projector/decoder VLM pieces on NPU. **Gate G3a:** model-layer compute runs on NPU, outputs match host ACUITY within tolerance, and per-stage timings are captured.
+- **Phase 3a — NPU-only LLM/VLM path (primary).** Export fixed-shape transformer decoder blocks to NBG; run them on NPU; extend to a tiny language model with embeddings, decoder compute, and logits on NPU; then add MobileCLIP-S0 encoder/projector/decoder VLM pieces on NPU. Decoder-block and tiny-LM subgates are now validated on the Radxa A733. **Gate G3a:** model-layer compute runs on NPU, outputs match host ACUITY within tolerance, and per-stage timings are captured.
 - **Phase 3b — LLM-on-NPU R&D (optional, time-boxed).** Attempt TIM-VX/TVM-BYOC `vsi_npu` or another documented path only if ACUITY/VIPLite blocks the required static decoder graphs. **Gate G3b:** any missing transformer op/subgraph is verified on NPU **OR** a documented blocker is ready for vendor escalation.
 - **Phase 4 — Optimization.** Quantization tuning (int16 vs pcq), SRAM caching, CPU thread pinning to A76, fixed-frequency governor. **Gate G4:** ≥20% latency improvement vs naive run.
 - **Phase 5 — PORTING to Orange Pi Zero 3W (final target).** Reflash to Orange Pi official image 1.0.4 / kernel 6.1.31 / bookworm. Reuse NBG files as-is; obtain Orange Pi's NPU KMD + VIPLite from its BSP; **recompile** awnn/llama.cpp apps against bookworm glibc; confirm `/dev/vipcore` device-tree/overlay. **Gate G5:** identical NBG runs on Orange Pi NPU; outputs match Radxa within tolerance. *Transfers as-is:* NBG models, ACUITY workflow, architecture. *Rebuilds:* kernel NPU module (from OPi BSP), C++ binaries (bookworm), DT/overlay.

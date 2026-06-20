@@ -147,10 +147,10 @@ logs/board/g3a-llama-decode-llama-simple-chat-smollm2-q4km.txt
 
 ## Result
 
-The CPU-side decoder subgate for Phase 3a passes for a small GGUF model:
-llama.cpp builds on the Radxa Cubie A7Z, a Q4_K_M SmolLM2 model loads, prompt
-and decode timings are measurable, and non-interactive text generation works.
+As a historical CPU diagnostic baseline, llama.cpp builds on the Radxa Cubie
+A7Z, a Q4_K_M SmolLM2 model loads, prompt and decode timings are measurable,
+and non-interactive text generation works.
 
-G3a is still not complete. The remaining work is to bridge the MobileCLIP-S0 NPU
-embedding path into a compatible language decoder path, including any projector
-or adapter needed for an actual image-to-text response.
+This result is not an accepted G3a subgate under the active NPU-only
+requirement. The accepted path is the NPU language graph documented in
+`g3a-tiny-lm-gather-npu.md`, followed by an NPU-side VLM projector/decoder path.

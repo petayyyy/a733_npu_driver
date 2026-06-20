@@ -132,8 +132,26 @@ through ACUITY to int16 NBG, and run on the A733:
   reductions, causal attention, residuals, and logits projection.
 
 This proves a static transformer decoder block can execute on the VIP9000 NPU.
-The next G3a gate is a tiny fixed-shape NPU language model with token embedding
-handling, decoder compute, and logits in the NBG graph.
+
+The tiny language-model NPU subgate also succeeded. A deterministic fixed-shape
+LM graph was generated with int32 token IDs, ONNX `Gather` token embeddings,
+position embeddings, decoder compute, and logits in one NBG:
+
+- NBG size: `87,016` bytes.
+- Input: `1x4` int32 token IDs (`1 5 9 2`).
+- Output: `1x4x16` logits tensor, int16 dynamic fixed point `dfp=14`.
+- Runtime: `profile inference time` between `62us` and `71us`,
+  `vpm run ret=0`.
+- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+  diff `0.000610352`, mean abs diff `0.000153542`, cosine `0.999999929`.
+- Covered language-model path includes token embedding `Gather`, position
+  embedding add, causal attention, MLP, LayerNorm-style reductions, and logits
+  projection.
+
+This proves that the public ACUITY/VIPLite path can run a complete tiny
+fixed-shape language-model graph on the A733 NPU. The next G3a gate is NPU VLM
+integration: MobileCLIP-S0 encoder output, projector/adapter, and NPU language
+decoder graph.
 
 Historical CPU baseline: llama.cpp built on the Radxa board at
 commit `f449e0553708b895adbd94a301431cef691f632d`; the separate

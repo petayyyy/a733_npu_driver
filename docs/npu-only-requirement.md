@@ -51,8 +51,8 @@ deliverable for this project.
    through ACUITY to A733 NBG.
 2. Done: ran the generated decoder-block NBG on the Radxa board through
    VIPLite.
-3. Extend from one block to a tiny fixed-shape language model that produces
-   logits on NPU.
+3. Done: extended from one block to a tiny fixed-shape language model with
+   token IDs, embedding `Gather`, decoder compute, and logits on NPU.
 4. Add NPU-side VLM pieces: MobileCLIP-S0 encoder output, projector/adapter, and
    NPU language decoder path.
 5. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required

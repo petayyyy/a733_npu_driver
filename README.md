@@ -18,11 +18,13 @@ orchestration, validation, and other non-inference support work.
   on the A733 NPU. A tiny fixed-shape transformer decoder block was also
   exported to int16 NBG and validated on the A733 NPU, including attention,
   Softmax, GELU, LayerNorm-style reductions, residuals, and logits output. The
-  previous CPU llama.cpp decoder result is retained only as a diagnostic
+  follow-up tiny language-model probe with int32 token IDs, ONNX `Gather` token
+  embeddings, decoder compute, and logits also runs as an A733 NBG on the NPU.
+  The previous CPU llama.cpp decoder result is retained only as a diagnostic
   baseline and is not a project deliverable.
 
-The next milestone is a tiny fixed-shape NPU language model that includes token
-embedding handling, decoder compute, and logits through VIPLite.
+The next milestone is connecting the NPU language path to the VLM path:
+MobileCLIP-S0 encoder output, NPU projector/adapter, and NPU language decoder.
 
 ## Repository Layout
 
@@ -40,6 +42,7 @@ scripts/
     run-vpm.sh             Logged wrapper around vpm_run
   host/
     make_tiny_decoder_block_onnx.py Generate fixed-shape decoder-block ONNX probe
+    make_tiny_lm_onnx.py Generate fixed-shape tiny LM ONNX probes
     prepare-workspace.ps1  Create local host workspace and check Docker image
     run-board-smoke.ps1    Copy board scripts over SSH and run G0/G1 smoke test
     ssh_exec.py            Password-based SSH/SFTP helper for automation
@@ -51,6 +54,7 @@ reports/
   g3a-clip-tiny-vision.md  Tiny CLIP vision-encoder NPU probe
   g3a-mobileclip-s0-vision.md MobileCLIP-S0 vision-encoder NPU validation
   g3a-tiny-decoder-block-npu.md Tiny transformer decoder block NPU validation
+  g3a-tiny-lm-gather-npu.md Tiny token-id LM NPU validation
   g3a-llama-cpp-decoder.md Historical CPU baseline, not a deliverable
 ```
 
