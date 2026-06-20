@@ -86,13 +86,19 @@
     `vpm run ret=0`.
   - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
     diff `0.001159668`, mean abs diff `0.000180054`, cosine `0.999999827`.
+- NPU-only fixed-window tiny LM decode-loop subgate passed: ran 8 repeated tiny
+  LM NBG forward passes on the Radxa, with CPU limited to writing the next
+  `1x4` int32 token window and selecting argmax from NPU logits.
+  - Initial prompt: `1 5 9 2`.
+  - Generated tiny-token sequence: `1 5 9 2 1 8 4 5 8 4 8 4`.
+  - Per-step NPU profile: min `68us`, max `138us`, mean `93.375us`.
+  - Every step logged `cid=0x1000003b` and `vpm run ret=0`.
 
 ## Next Gate
 
 Phase 3a / NPU-only LLM/VLM path:
 
-1. Scale the fixed-shape language/VLM path into a decode loop where CPU only
-   updates token IDs and postprocesses logits, while every model-layer
-   evaluation stays on NPU.
-2. If required for memory or compiler limits, split the NPU path into explicit
-   NBG stages while keeping all model-layer stages on NPU.
+1. Replace per-token `vpm_run` launches with a persistent VIPLite/awnn runner
+   that loads the tiny LM NBG once and submits repeated token windows.
+2. Extend the same fixed-window loop pattern to the VLM bridge path, keeping
+   all model-layer stages on NPU.

@@ -56,8 +56,10 @@ deliverable for this project.
 4. Done: added a tiny NPU-side VLM bridge with MobileCLIP-S0-style encoder
    output, projector/adapter, token embedding `Gather`, image/text concat,
    decoder compute, and logits on NPU.
-5. Scale the fixed-shape language/VLM path into a decode loop where CPU only
-   updates token IDs, moves tensors between NPU graph stages if needed, and
-   postprocesses logits.
-6. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
+5. Done: validated a fixed-window tiny LM decode loop where CPU only updates
+   token IDs and postprocesses logits while every model-layer forward pass
+   runs on NPU.
+6. Replace per-token `vpm_run` launches with a persistent VIPLite/awnn runner,
+   then extend the same loop pattern to the VLM path.
+7. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
    transformer operations or static decoder graphs.

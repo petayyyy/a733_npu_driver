@@ -89,6 +89,8 @@ Gate G3a:
 - Tiny fixed-shape language model runs on NPU.
 - VLM path runs model-layer compute on NPU: vision encoder, projector/adapter,
   and language decoder graph.
+- Fixed-window decode loop repeatedly runs NPU language-model forward passes;
+  CPU only updates token IDs and postprocesses logits.
 - Per-stage timing is captured.
 
 Current status: vision encoder NPU subgate passed; CPU decoder result is
@@ -169,10 +171,26 @@ image/text concat, decoder compute, and logits in one NBG:
   reductions, and logits projection.
 
 This completes the first NPU-only connection between the already validated
-MobileCLIP-S0 encoder output contract and the NPU language path. The next G3a
-gate is scaling this static pattern into a decode loop where CPU only updates
-token IDs, moves tensors between NPU graph stages if needed, and postprocesses
-logits while every model-layer evaluation stays on NPU.
+MobileCLIP-S0 encoder output contract and the NPU language path.
+
+The fixed-window tiny LM decode-loop subgate also succeeded. The board runner
+repeated the tiny LM NBG forward pass 8 times, sliding a `1x4` int32 token
+window on CPU and selecting the next token from the NPU-produced last-position
+logits:
+
+- Initial prompt: `1 5 9 2`.
+- Generated tiny-token sequence: `1 5 9 2 1 8 4 5 8 4 8 4`.
+- Runtime per NPU forward: min `68us`, max `138us`, mean `93.375us`.
+- Every step logged `VIPLite driver software version 2.0.3.2-AW-2024-08-30`,
+  `cid=0x1000003b`, and `vpm run ret=0`.
+- CPU work was limited to token-window update, `vpm_run` launch, and logits
+  argmax/postprocessing; embeddings, attention, MLP, reductions, and logits
+  stayed in the NBG graph.
+
+This proves the static NPU language graph can be driven as an autoregressive
+loop under the active NPU-only constraint. The next G3a gate is replacing the
+per-token `vpm_run` process launch with a persistent VIPLite/awnn runner, then
+extending the same loop pattern to the VLM path.
 
 Historical CPU baseline: llama.cpp built on the Radxa board at
 commit `f449e0553708b895adbd94a301431cef691f632d`; the separate
