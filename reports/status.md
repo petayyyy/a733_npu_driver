@@ -42,14 +42,23 @@
   - Runtime: `profile inference time` about `22.6ms`, `vpm run ret=0`.
   - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
     diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
+- Phase 3a CPU decoder subgate passed: llama.cpp built on the Radxa board at
+  commit `f449e0553708b895adbd94a301431cef691f632d`, and
+  `SmolLM2-135M-Instruct-Q4_K_M.gguf` ran through CPU-only GGUF inference.
+  - Model: `134.52M` params, `98.87 MiB` in llama-bench, Q4_K_M.
+  - llama-bench, CPU-only: best decode for this model was `56.74 tok/s` at
+    2 threads; best prompt throughput was `122.57 tok/s` at 8 threads.
+  - llama-simple chat prompt smoke: prompt eval `46.93 tok/s`, decode eval
+    `29.92 tok/s`, total `2515.07 ms / 64 tokens`.
 
 ## Next Gate
 
 Phase 3a / hybrid VLM path:
 
-1. Start CPU-side llama.cpp decoder bring-up for the hybrid pipeline.
-2. Select the first image-to-text target pairing for the MobileCLIP-S0
+1. Select the first image-to-text target pairing for the MobileCLIP-S0
    embedding path.
-3. Wire encoder output transfer and decoder input plumbing.
-4. Capture end-to-end timing for image preprocess, NPU encoder, projector if
-   needed, and CPU decode.
+2. Wire encoder output transfer and decoder input plumbing.
+3. Add or source the projector/adapter needed between `1x512` image embeddings
+   and the selected decoder.
+4. Capture end-to-end timing for image preprocess, NPU encoder, projector, and
+   CPU decode.

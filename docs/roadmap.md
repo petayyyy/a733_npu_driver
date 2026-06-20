@@ -84,7 +84,7 @@ Gate G3a:
 - End-to-end image-to-text response works.
 - Per-stage timing is captured.
 
-Current status: vision encoder NPU subgate passed.
+Current status: vision encoder NPU subgate and CPU decoder subgate passed.
 
 The first compatibility probe passed. The tiny random CLIP vision ONNX from
 `hf-internal-testing/tiny-random-CLIPModel` was fixed to `1x3x30x30`, quantized
@@ -106,8 +106,23 @@ exported to NBG, and run on the A733:
 - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
   diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
 
-This does not complete G3a; it completes the static vision-encoder NPU proof
-and leaves the CPU decoder and end-to-end image-to-text integration.
+This completed the static vision-encoder NPU proof and established the encoder
+side of the hybrid path.
+
+The CPU decoder subgate also passed. llama.cpp built on the Radxa board at
+commit `f449e0553708b895adbd94a301431cef691f632d`; the separate
+`llama-simple`, `llama-simple-chat`, and `llama-bench` targets were used because
+the current upstream unified `llama-app` target did not link in this
+configuration. `SmolLM2-135M-Instruct-Q4_K_M.gguf` ran CPU-only:
+
+- Model: `134.52M` params, `98.87 MiB` in llama-bench.
+- Best llama-bench decode for this tiny model: `56.74 tok/s` at 2 threads.
+- Best llama-bench prompt throughput: `122.57 tok/s` at 8 threads.
+- Generation smoke via `llama-simple`: prompt eval `46.93 tok/s`, decode eval
+  `29.92 tok/s`, total `2515.07 ms / 64 tokens`.
+
+This still does not complete G3a; the remaining gate item is the actual
+image-to-text integration between the NPU encoder output and CPU decoder path.
 
 ## Phase 3b - LLM-on-NPU R&D
 
