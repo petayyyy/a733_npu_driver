@@ -20,11 +20,15 @@ orchestration, validation, and other non-inference support work.
   Softmax, GELU, LayerNorm-style reductions, residuals, and logits output. The
   follow-up tiny language-model probe with int32 token IDs, ONNX `Gather` token
   embeddings, decoder compute, and logits also runs as an A733 NBG on the NPU.
+  A tiny VLM bridge now also runs on the A733 NPU: MobileCLIP-S0-style
+  `1x512` image embedding input, NPU projector/adapter, token embedding
+  `Gather`, image/text concat, decoder compute, and `1x5x16` logits in one NBG.
   The previous CPU llama.cpp decoder result is retained only as a diagnostic
   baseline and is not a project deliverable.
 
-The next milestone is connecting the NPU language path to the VLM path:
-MobileCLIP-S0 encoder output, NPU projector/adapter, and NPU language decoder.
+The next milestone is scaling the fixed-shape NPU language/VLM path into a
+decode loop where CPU only updates token IDs, moves tensors between NPU graph
+stages if needed, and postprocesses logits.
 
 ## Repository Layout
 
@@ -43,6 +47,7 @@ scripts/
   host/
     make_tiny_decoder_block_onnx.py Generate fixed-shape decoder-block ONNX probe
     make_tiny_lm_onnx.py Generate fixed-shape tiny LM ONNX probes
+    make_tiny_vlm_bridge_onnx.py Generate fixed-shape VLM bridge ONNX probe
     prepare-workspace.ps1  Create local host workspace and check Docker image
     run-board-smoke.ps1    Copy board scripts over SSH and run G0/G1 smoke test
     ssh_exec.py            Password-based SSH/SFTP helper for automation
@@ -55,6 +60,7 @@ reports/
   g3a-mobileclip-s0-vision.md MobileCLIP-S0 vision-encoder NPU validation
   g3a-tiny-decoder-block-npu.md Tiny transformer decoder block NPU validation
   g3a-tiny-lm-gather-npu.md Tiny token-id LM NPU validation
+  g3a-tiny-vlm-bridge-npu.md Tiny VLM bridge NPU validation
   g3a-llama-cpp-decoder.md Historical CPU baseline, not a deliverable
 ```
 

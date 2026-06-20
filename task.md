@@ -12,11 +12,15 @@ execution roadmap is to prove fixed-shape transformer decoder blocks, then a
 tiny language model, then a VLM path on the NPU through ACUITY/VIPLite or a
 documented NPU compiler/runtime alternative.
 
-Current progress: the fixed-shape transformer decoder-block subgate and the
-tiny fixed-shape language-model subgate are validated on the A733 NPU. The LM
-graph accepts int32 token IDs and runs embedding `Gather`, decoder compute, and
-logits in the NBG graph. The next accepted target is NPU-side VLM integration:
-MobileCLIP-S0 encoder output, projector/adapter, and NPU language decoder path.
+Current progress: the fixed-shape transformer decoder-block subgate, the tiny
+fixed-shape language-model subgate, and a tiny fixed-shape VLM bridge subgate
+are validated on the A733 NPU. The LM graph accepts int32 token IDs and runs
+embedding `Gather`, decoder compute, and logits in the NBG graph. The VLM
+bridge accepts a MobileCLIP-S0-style `1x512` image embedding plus int32 token
+IDs and runs projector/adapter, token embedding `Gather`, image/text concat,
+decoder compute, and logits in the NBG graph. The next accepted target is
+scaling this static NPU-only path into a decode loop where CPU only handles
+orchestration, token updates, tensor movement if needed, and postprocessing.
 
 ## TL;DR
 - **Getting a small CNN/vision model running on the A733 NPU is "almost certainly achievable" today** — the vendor VIPLite 2.0 / ACUITY (NBG) stack already runs ResNet50, YOLOv5/v8/v11 and YOLACT on the Vivante VIP9000 via `/dev/vipcore` on Radxa's Debian image; this is the realistic proof-of-principle target. **Running a full LLM/VLM *on the NPU* is "research risk," not a turnkey path:** there is no RKLLM-equivalent for Allwinner, the public ACUITY toolkit exposes only uint8/int16/bf16/pcq (int8 per-channel) quantization (no INT4), NBG graphs are static-shape (no dynamic KV-cache), and no one has demonstrated a transformer decoder on any VIP9000-class NPU via the public stack.

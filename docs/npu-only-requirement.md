@@ -53,7 +53,11 @@ deliverable for this project.
    VIPLite.
 3. Done: extended from one block to a tiny fixed-shape language model with
    token IDs, embedding `Gather`, decoder compute, and logits on NPU.
-4. Add NPU-side VLM pieces: MobileCLIP-S0 encoder output, projector/adapter, and
-   NPU language decoder path.
-5. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
+4. Done: added a tiny NPU-side VLM bridge with MobileCLIP-S0-style encoder
+   output, projector/adapter, token embedding `Gather`, image/text concat,
+   decoder compute, and logits on NPU.
+5. Scale the fixed-shape language/VLM path into a decode loop where CPU only
+   updates token IDs, moves tensors between NPU graph stages if needed, and
+   postprocesses logits.
+6. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
    transformer operations or static decoder graphs.

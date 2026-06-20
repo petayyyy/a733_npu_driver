@@ -149,9 +149,30 @@ position embeddings, decoder compute, and logits in one NBG:
   projection.
 
 This proves that the public ACUITY/VIPLite path can run a complete tiny
-fixed-shape language-model graph on the A733 NPU. The next G3a gate is NPU VLM
-integration: MobileCLIP-S0 encoder output, projector/adapter, and NPU language
-decoder graph.
+fixed-shape language-model graph on the A733 NPU.
+
+The tiny VLM bridge NPU subgate also succeeded. A deterministic fixed-shape VLM
+bridge was generated with a MobileCLIP-S0-style `1x512` image embedding input,
+int32 token IDs, NPU projector/adapter, ONNX `Gather` token embeddings,
+image/text concat, decoder compute, and logits in one NBG:
+
+- NBG size: `94,656` bytes.
+- Input: `1x512` image embedding, int16 dynamic fixed point `dfp=16`; `1x4`
+  int32 token IDs (`1 5 9 2`).
+- Output: `1x5x16` logits tensor, int16 dynamic fixed point `dfp=14`.
+- Runtime: `profile inference time` between `63us` and `72us`,
+  `vpm run ret=0`.
+- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+  diff `0.001159668`, mean abs diff `0.000180054`, cosine `0.999999827`.
+- Covered VLM bridge path includes image projector/adapter, token embedding
+  `Gather`, image/text concat, causal attention, MLP, LayerNorm-style
+  reductions, and logits projection.
+
+This completes the first NPU-only connection between the already validated
+MobileCLIP-S0 encoder output contract and the NPU language path. The next G3a
+gate is scaling this static pattern into a decode loop where CPU only updates
+token IDs, moves tensors between NPU graph stages if needed, and postprocesses
+logits while every model-layer evaluation stays on NPU.
 
 Historical CPU baseline: llama.cpp built on the Radxa board at
 commit `f449e0553708b895adbd94a301431cef691f632d`; the separate
