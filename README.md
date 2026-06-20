@@ -12,11 +12,12 @@ decoder runs on CPU.
   `vpm_run` all confirm the A733 VIP9000 path.
 - Phase 2 / G2: passed for SDK LeNet and ONNX Inception v1 in both uint8 and
   int16 through ACUITY Docker `ubuntu-npu:v2.0.10.1`.
-- Phase 3a: started. A tiny CLIP-like static vision encoder was exported to
-  int16 NBG and validated on the A733 NPU as an op-coverage probe.
+- Phase 3a: vision encoder NPU subgate passed. A tiny CLIP-like probe and a
+  real MobileCLIP-S0 static vision encoder were exported to int16 NBG and
+  validated on the A733 NPU.
 
-The next milestone is a real small vision encoder, then pairing its embedding
-output with a CPU-side llama.cpp decoder for the hybrid VLM path.
+The next milestone is pairing the MobileCLIP-S0 embedding output with a
+CPU-side llama.cpp decoder for the hybrid VLM path.
 
 ## Repository Layout
 
@@ -39,6 +40,7 @@ reports/
   g2-acuity-lenet.md       ACUITY LeNet validation report
   g2-acuity-inception-v1.md ACUITY ONNX Inception validation report
   g3a-clip-tiny-vision.md  Tiny CLIP vision-encoder NPU probe
+  g3a-mobileclip-s0-vision.md MobileCLIP-S0 vision-encoder NPU validation
 ```
 
 Generated board logs, host logs, models, and temporary workspaces are ignored by

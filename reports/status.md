@@ -34,13 +34,22 @@
     and MLP blocks.
   - Runtime: `profile inference time` about `2.17ms`, output shape `1x64`,
     `vpm run ret=0`.
+- Phase 3a real encoder subgate passed: `Xenova/mobileclip_s0`
+  `onnx/vision_model.onnx` was fixed to `1x3x256x256`, converted to int16 NBG,
+  and validated on the A733 through `vpm_run`.
+  - NBG size: `19,376,840` bytes.
+  - Output: `1x512` int16 image embedding.
+  - Runtime: `profile inference time` about `22.6ms`, `vpm run ret=0`.
+  - ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+    diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
 
 ## Next Gate
 
 Phase 3a / hybrid VLM path:
 
-1. Select a real small static vision encoder candidate, not just the tiny
-   random CLIP probe.
-2. Convert/export the encoder to NBG with int16 quantization.
-3. Validate encoder inference on the Radxa board with output comparison.
-4. Start CPU-side llama.cpp decoder bring-up for the hybrid pipeline.
+1. Start CPU-side llama.cpp decoder bring-up for the hybrid pipeline.
+2. Select the first image-to-text target pairing for the MobileCLIP-S0
+   embedding path.
+3. Wire encoder output transfer and decoder input plumbing.
+4. Capture end-to-end timing for image preprocess, NPU encoder, projector if
+   needed, and CPU decode.

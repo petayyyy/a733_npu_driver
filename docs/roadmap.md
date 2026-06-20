@@ -61,7 +61,8 @@ path on the Radxa board:
 - int16: `profile inference time` about `20.85ms`, ONNX/non-quantized top-5
   preserved, `vpm run ret=0`.
 
-The next G2-adjacent model is a vision encoder candidate for Phase 3a.
+The G2-adjacent static vision encoder path is also proven through the
+MobileCLIP-S0 Phase 3a report.
 
 Primary script:
 
@@ -83,9 +84,11 @@ Gate G3a:
 - End-to-end image-to-text response works.
 - Per-stage timing is captured.
 
-Current status: first compatibility probe passed. The tiny random CLIP vision
-ONNX from `hf-internal-testing/tiny-random-CLIPModel` was fixed to
-`1x3x30x30`, quantized to int16, exported to NBG, and run on the A733:
+Current status: vision encoder NPU subgate passed.
+
+The first compatibility probe passed. The tiny random CLIP vision ONNX from
+`hf-internal-testing/tiny-random-CLIPModel` was fixed to `1x3x30x30`, quantized
+to int16, exported to NBG, and run on the A733:
 
 - NBG size: `720,824` bytes.
 - Output: `1x64` int16 embedding tensor.
@@ -93,8 +96,18 @@ ONNX from `hf-internal-testing/tiny-random-CLIPModel` was fixed to
 - Covered transformer-style ops include MatMul, Softmax, LayerNorm pattern,
   Gather, Conv patch embedding, and MLP blocks.
 
-This does not complete G3a; it proves the static vision-encoder NPU path before
-moving to a semantically useful encoder and CPU decoder.
+The real encoder pass also succeeded. `Xenova/mobileclip_s0`
+`onnx/vision_model.onnx` was fixed to `1x3x256x256`, quantized to int16,
+exported to NBG, and run on the A733:
+
+- NBG size: `19,376,840` bytes.
+- Output: `1x512` int16 image embedding tensor.
+- Runtime: `profile inference time` about `22.6ms`, `vpm run ret=0`.
+- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
+  diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
+
+This does not complete G3a; it completes the static vision-encoder NPU proof
+and leaves the CPU decoder and end-to-end image-to-text integration.
 
 ## Phase 3b - LLM-on-NPU R&D
 
