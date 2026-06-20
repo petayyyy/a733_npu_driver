@@ -20,11 +20,18 @@
   `profile inference time=2807us`.
 - Gate G2 passed for SDK LeNet: ACUITY Docker `ubuntu-npu:v2.0.10.1` generated
   uint8 and int16 NBG files, both validated on the A733 through `vpm_run`.
+- Gate G2 extension passed for ONNX Inception v1: ACUITY generated uint8 and
+  int16 NBG files, both validated on the A733 through `vpm_run`.
+  - uint8: `1x3x224x224`, `profile inference time` about `14.36ms`, top-1
+    class index `885`, `vpm run ret=0`.
+  - int16: `1x3x224x224`, `profile inference time` about `20.85ms`, top-1
+    class index `885`, ONNX/non-quantized top-5 preserved, `vpm run ret=0`.
 
 ## Next Gate
 
-Phase 2 extension / custom model:
+Phase 3a / hybrid VLM path:
 
-1. Convert a custom ONNX CNN to NBG with int16 quantization.
-2. Validate converted NBG on the Radxa board.
-3. Start Phase 3a vision-encoder candidate selection.
+1. Select a small static vision encoder candidate.
+2. Convert/export the encoder to NBG with int16 quantization.
+3. Validate encoder inference on the Radxa board.
+4. Start CPU-side llama.cpp decoder bring-up for the hybrid pipeline.

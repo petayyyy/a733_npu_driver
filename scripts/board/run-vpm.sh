@@ -4,7 +4,11 @@ set -eu
 ROOT_DIR="${A733_LOG_ROOT:-logs/board}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 HOST="$(hostname 2>/dev/null || echo board)"
-OUT_DIR="${ROOT_DIR}/${HOST}-vpm-${STAMP}"
+if [ -n "${A733_LOG_LABEL:-}" ]; then
+    OUT_DIR="${ROOT_DIR}/${HOST}-vpm-${A733_LOG_LABEL}-${STAMP}"
+else
+    OUT_DIR="${ROOT_DIR}/${HOST}-vpm-${STAMP}"
+fi
 mkdir -p "${OUT_DIR}"
 
 if [ "$#" -eq 0 ]; then
@@ -14,6 +18,8 @@ Usage: run-vpm.sh <vpm_run arguments>
 Environment:
   A733_VPM_RUN=/path/to/vpm_run      Optional explicit vpm_run path.
   A733_VIP_LIB_DIR=/path/to/libs     Optional VIPLite library directory.
+  A733_VPM_CWD=/path/to/model-dir    Optional working directory for vpm_run.
+  A733_LOG_LABEL=name                Optional label appended to log directory.
   A733_LOG_ROOT=logs/board           Optional log root.
 USAGE
     exit 2
@@ -50,6 +56,10 @@ fi
 
 echo "vpm_run=${VPM}" | tee "${OUT_DIR}/run.log"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" | tee -a "${OUT_DIR}/run.log"
+if [ -n "${A733_VPM_CWD:-}" ]; then
+    echo "cwd=${A733_VPM_CWD}" | tee -a "${OUT_DIR}/run.log"
+    cd "${A733_VPM_CWD}"
+fi
 echo "+ ${VPM} $*" | tee -a "${OUT_DIR}/run.log"
 
 "${VPM}" "$@" > "${OUT_DIR}/vpm_run.out" 2> "${OUT_DIR}/vpm_run.err"

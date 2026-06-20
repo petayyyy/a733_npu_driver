@@ -7,14 +7,14 @@ decoder runs on CPU.
 
 ## Current Status
 
-- Phase 0 / G0: waiting for board access.
-- Phase 1 / G1: scripts prepared for `/dev/vipcore`, VIPLite, and `vpm_run`
-  smoke testing.
-- Phase 2+: host-side workspace scaffolding prepared; ACUITY conversion still
-  passed for SDK LeNet; custom ONNX conversion is next.
+- Phase 0 / G0: passed on Radxa Cubie A7Z over SSH.
+- Phase 1 / G1: passed. `/dev/vipcore`, VIPLite 2.0.3.2, YOLOv8n, and SDK
+  `vpm_run` all confirm the A733 VIP9000 path.
+- Phase 2 / G2: passed for SDK LeNet and ONNX Inception v1 in both uint8 and
+  int16 through ACUITY Docker `ubuntu-npu:v2.0.10.1`.
 
-The next real milestone is an SSH session to the Radxa Cubie A7Z or target
-Orange Pi board.
+The next milestone is Phase 3a: export a small static vision encoder to NBG and
+pair it with a CPU-side llama.cpp decoder for the hybrid VLM path.
 
 ## Repository Layout
 
@@ -33,6 +33,9 @@ scripts/
     ssh_exec.py            Password-based SSH/SFTP helper for automation
 reports/
   status.md                Living status log
+  g1-radxa-cubie-a7z.md    Hardware bring-up report
+  g2-acuity-lenet.md       ACUITY LeNet validation report
+  g2-acuity-inception-v1.md ACUITY ONNX Inception validation report
 ```
 
 Generated board logs, host logs, models, and temporary workspaces are ignored by
@@ -90,9 +93,9 @@ A733_NPU_RUN_CMD='cd /home/radxa/yolo_shm && export LD_LIBRARY_PATH=/home/radxa/
 The script writes logs under `logs/board/<host>-<timestamp>/` and summarizes
 whether G0/G1 checks are satisfied.
 
-## What I Need For The SSH Stage
+## SSH Stage Inputs
 
-Send:
+For a new board or image, send:
 
 - SSH endpoint and username.
 - Board type: Radxa Cubie A7Z or Orange Pi Zero 3W.

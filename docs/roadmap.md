@@ -53,9 +53,15 @@ Gate G2:
 - Converted NBG runs on board.
 - Accuracy is compared against ONNX baseline and recorded.
 
-Current status: passed for SDK LeNet in both uint8 and int16 using
-`ubuntu-npu:v2.0.10.1`. The remaining G2 extension is a custom ONNX CNN or
-vision encoder.
+Current status: passed for SDK LeNet and ONNX Inception v1 in both uint8 and
+int16 using `ubuntu-npu:v2.0.10.1`. Inception v1 validates the non-toy ONNX CNN
+path on the Radxa board:
+
+- uint8: `profile inference time` about `14.36ms`, `vpm run ret=0`.
+- int16: `profile inference time` about `20.85ms`, ONNX/non-quantized top-5
+  preserved, `vpm run ret=0`.
+
+The next G2-adjacent model is a vision encoder candidate for Phase 3a.
 
 Primary script:
 
