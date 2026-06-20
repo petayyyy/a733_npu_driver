@@ -83,6 +83,19 @@ Gate G3a:
 - End-to-end image-to-text response works.
 - Per-stage timing is captured.
 
+Current status: first compatibility probe passed. The tiny random CLIP vision
+ONNX from `hf-internal-testing/tiny-random-CLIPModel` was fixed to
+`1x3x30x30`, quantized to int16, exported to NBG, and run on the A733:
+
+- NBG size: `720,824` bytes.
+- Output: `1x64` int16 embedding tensor.
+- Runtime: `profile inference time` about `2.17ms`, `vpm run ret=0`.
+- Covered transformer-style ops include MatMul, Softmax, LayerNorm pattern,
+  Gather, Conv patch embedding, and MLP blocks.
+
+This does not complete G3a; it proves the static vision-encoder NPU path before
+moving to a semantically useful encoder and CPU decoder.
+
 ## Phase 3b - LLM-on-NPU R&D
 
 Goal: time-boxed investigation only.

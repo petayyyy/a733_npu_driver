@@ -26,12 +26,21 @@
     class index `885`, `vpm run ret=0`.
   - int16: `1x3x224x224`, `profile inference time` about `20.85ms`, top-1
     class index `885`, ONNX/non-quantized top-5 preserved, `vpm run ret=0`.
+- Phase 3a probe started: `hf-internal-testing/tiny-random-CLIPModel`
+  `onnx/vision_model.onnx` was fixed to `1x3x30x30`, converted to int16 NBG,
+  and validated on the A733 through `vpm_run`.
+  - NBG size: `720,824` bytes.
+  - Operators covered include MatMul, Softmax, LayerNorm pattern, Gather, Conv,
+    and MLP blocks.
+  - Runtime: `profile inference time` about `2.17ms`, output shape `1x64`,
+    `vpm run ret=0`.
 
 ## Next Gate
 
 Phase 3a / hybrid VLM path:
 
-1. Select a small static vision encoder candidate.
+1. Select a real small static vision encoder candidate, not just the tiny
+   random CLIP probe.
 2. Convert/export the encoder to NBG with int16 quantization.
-3. Validate encoder inference on the Radxa board.
+3. Validate encoder inference on the Radxa board with output comparison.
 4. Start CPU-side llama.cpp decoder bring-up for the hybrid pipeline.
