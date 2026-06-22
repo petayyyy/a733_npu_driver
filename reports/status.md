@@ -461,19 +461,36 @@
     `Missing channel_dim attribute`; after adding `channel_dim: -1` for weights
     and `channel_dim: 0` for biases, ACUITY loaded the seed table and bypassed
     the original full-Qwen `End quantization...`/zero-byte-table stall.
-  - Verified the seeded full-Qwen `pcq` retry reaches export and packs all
-    fullconnect weights/biases, but still produces no NBG:
-    - Quantized inference fails on the final last-token/logits path with
-      `ValueError: Invalid value in tensor used for shape: -30`.
-    - `gen_nbg` fails with
-      `Cannot calculate the reshape tensor 4294107136 to 4294106880`,
-      `Setup node[1666] RESHAPE2 fail`, and
-      `Fatal model generation error: 65280`.
+  - Verified the next seeded full-Qwen `pcq` retry originally used the wrong
+    ACUITY import shape (`--input-size-list 1,32`), causing a false final-path
+    blocker: quantized inference failed with
+    `ValueError: Invalid value in tensor used for shape: -30`, and `gen_nbg`
+    failed with `Setup node[1666] RESHAPE2 fail`.
+  - Re-ran seeded full-Qwen `pcq` as `qwen25_05b_w32_seed_pcq_rank3` with the
+    correct Qwen import shape (`--input-size-list 32`). This fixed final slice
+    shape inference: `final_last_token_2` became `(1 1 896)`, `reshape_1972`
+    `(1 896)`, and logits `(1 1 151936)`.
+  - Verified corrected full-Qwen seeded `pcq` host conversion/export:
     - Logs:
-      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.log`,
-      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.err.log`,
-      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.retry1.log`, and
-      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.retry1.err.log`.
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-rank3-convert.retry1.log` and
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-rank3-convert.retry1.err.log`.
+    - ACUITY quantized inference completed `Error(0),Warning(0)`; host top-5
+      was `117, 7245, 220, 37880, 118411`.
+    - Export completed `Error(0),Warning(0)`; simulator timings:
+      create network `13,628ms`, verify graph `60,852ms`, one run
+      `39,215.82ms`.
+    - Package:
+      `work/model-packages/qwen25_05b_w32_seed_pcq_rank3/pcq/network_binary.nb`,
+      size `587,912,960` bytes.
+  - Uploaded and ran the full Qwen W=32 seeded `pcq` package on the A733:
+    - Board path:
+      `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_seed_pcq_rank3`.
+    - Logs:
+      `logs/board/qwen25_05b_w32_seed_pcq_rank3_smoke-run.log` and
+      `logs/board/qwen25_05b_w32_seed_pcq_rank3_smoke-rss.env`.
+    - Result: runner killed with `status=137`, `peak_rss_kb=574,132`, and an
+      empty `run.log` before VIPLite metadata. Board memory after kill:
+      `959Mi` total, `661Mi` available, `2.3Gi` swap available.
 - Task T5 SmolLM2 int8-quality continuation:
   - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
     reached `End quantization...` / `Dump net quantize tensor table` and then
@@ -514,13 +531,13 @@
 ## Next Gate
 
 T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
-1GiB Radxa board; full Qwen `pcq` is the viable memory target. The normal full
-`pcq` route stalls at ACUITY quantize-table emission, while the synthetic seeded
-PCQ route loads the table and reaches export/`gen_nbg` but fails in the final
-slice/logits path with negative shape `-30` and a VIP `RESHAPE2` setup error.
-Hardware bisection on this board found the current runnable partial ceiling at
-7 Qwen decoder layers (`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS
-`350,496 KB`); 8 layers exports on host but is too large for this board runtime.
+1GiB Radxa board. Full Qwen seeded `pcq` now also exports on host
+(`network_binary.nb=587,912,960`) after importing with `--input-size-list 32`,
+but the board runner is killed with `status=137` before VIPLite metadata
+(`peak_rss_kb=574,132`). Hardware bisection on this board found the current
+runnable partial ceiling at 7 Qwen decoder layers (`W=32`, `pcq`,
+`network_binary.nb=357,150,496`, peak RSS `350,496 KB`); 8 layers exports on
+host but is too large for this board runtime.
 
 T5 resume point: attempt 3 by combining the mixed seed with ACUITY hybrid
 quantization. If it repeats the prior hybrid quantize-table dump blocker,

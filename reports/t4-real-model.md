@@ -826,7 +826,8 @@ error: Missing channel_dim attribute
 ```
 
 After adding `channel_dim: -1` for weights and `channel_dim: 0` for biases, the
-retry loaded the seed table and bypassed the original full-Qwen `pcq` stall:
+first retry loaded the seed table and bypassed the original full-Qwen `pcq`
+stall:
 
 ```text
 logs/host/t4-qwen25-05b-w32-seed-pcq-convert.retry1.log
@@ -839,15 +840,17 @@ Packing fullconnect_1973 ...
 Packing fullconnect_2477 ...
 ```
 
-The seeded full-Qwen `pcq` export still does not produce an NBG. ACUITY
-quantized inference reports a negative shape on the final last-token/logits
-slice path:
+That retry used `--input-size-list 1,32`, unlike the successful Qwen imports
+which use `--input-size-list 32`. This made ACUITY import the token input with
+an extra dimension, and quantized inference reported a negative shape on the
+final last-token/logits slice path:
 
 ```text
 ValueError: Invalid value in tensor used for shape: -30
 ```
 
-The export path then reaches generated C/VIP graph setup and fails in `gen_nbg`:
+The export path then reached generated C/VIP graph setup and failed in
+`gen_nbg`:
 
 ```text
 Cannot calculate the reshape tensor 4294107136 to 4294106880.
@@ -857,10 +860,53 @@ missing export directory:
 work\ai-sdk\ZIFENG278-ai-sdk\models\qwen25_05b_w32_seed_pcq\wksp\qwen25_05b_w32_seed_pcq_pcq_nbg_unify
 ```
 
-No `network_binary.nb` was produced for the full seeded `pcq` Qwen graph. This
-moves the full-Qwen `pcq` blocker from the earlier quantize-table dump stall to
-a reproducible ACUITY/VIP reshape failure in the full graph's final slice/logits
-path after seeded quantization is loaded.
+Re-ran the seeded full-Qwen `pcq` conversion with the correct rank-3 input size:
+
+```text
+name: qwen25_05b_w32_seed_pcq_rank3
+--input-size-list 32
+logs/host/t4-qwen25-05b-w32-seed-pcq-rank3-convert.retry1.log
+logs/host/t4-qwen25-05b-w32-seed-pcq-rank3-convert.retry1.err.log
+```
+
+This removed the negative shape:
+
+```text
+Acuity output shape(slice): (1 1 896)
+Acuity output shape(reshape): (1 896)
+Acuity output shape(fullconnect): (1 151936)
+Acuity output shape(reshape): (1 1 151936)
+```
+
+The corrected seeded full-Qwen `pcq` path completed host inference and export:
+
+```text
+inference: Error(0),Warning(0)
+host top5: 117, 7245, 220, 37880, 118411
+Create Neural Network: 13,628ms
+Verify Graph: 60,852ms
+Run graph once: 39,215.82ms
+export: Error(0),Warning(0)
+package: work/model-packages/qwen25_05b_w32_seed_pcq_rank3/pcq
+network_binary.nb: 587,912,960 bytes
+```
+
+Uploaded and ran the full Qwen W=32 seeded `pcq` package on the A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_seed_pcq_rank3
+logs/board/qwen25_05b_w32_seed_pcq_rank3_smoke-run.log
+logs/board/qwen25_05b_w32_seed_pcq_rank3_smoke-rss.env
+network_binary.nb: 587,912,960 bytes
+runner status: 137
+peak_rss_kb: 574,132
+run.log: empty
+board memory after kill: 959Mi total, 661Mi available, 2.3Gi swap available
+```
+
+Interpretation: full Qwen W=32 seeded `pcq` now exports on host, but the full
+24-layer NBG is still too large for the current 1GiB A733 runtime path. The
+process is killed before VIPLite metadata is printed.
 
 ## Result
 
@@ -870,19 +916,17 @@ converts and executes but fails coherence at `W=32`.
 
 Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. The full
 24-layer `int16` control export passes on host but is too large for the 1GiB
-A733 board runtime. Full `pcq` is still the viable memory target, but the normal
-full `pcq` path stalls after `End quantization`, and the seeded full `pcq` path
-now reaches export/`gen_nbg` before failing in a generated `RESHAPE2` node.
-One-layer, four-layer, six-layer, and seven-layer Qwen `pcq` diagnostic NBGs
-run successfully on the NPU. Eight-layer Qwen `pcq` exports on host but is
-killed on the board before network creation completes.
+A733 board runtime. The normal full `pcq` path stalls after `End quantization`,
+but the synthetic seeded full `pcq` path now exports successfully on host and
+produces a 587,912,960-byte NBG. On the A733, that full `pcq` NBG is still
+killed by RAM before VIPLite metadata is printed. One-layer, four-layer,
+six-layer, and seven-layer Qwen `pcq` diagnostic NBGs run successfully on the
+NPU. Eight-layer Qwen `pcq` exports on host but is killed on the board before
+network creation completes.
 
 ## Next
 
-For a full Qwen board run on this 1GiB Radxa, the viable path is a full `pcq`
-or smaller-than-int16 package. The current blocker is ACUITY full-Qwen `pcq`
-export after seeded quantization: the table loads and fullconnects pack, but
-the final slice/logits path produces a negative-shape TensorFlow inference
-failure and a VIP `RESHAPE2` `gen_nbg` failure. For this 1GiB board, the
-observed partial-graph ceiling is 7 Qwen decoder layers at W=32 `pcq`; full
-Qwen `int16` is too large for board RAM.
+For a full Qwen board run on this 1GiB Radxa, the current blocker is board
+runtime memory, not host export. Full Qwen `int16` is too large for board RAM;
+full Qwen seeded `pcq` exports but is still too large; the observed runnable
+partial-graph ceiling is 7 Qwen decoder layers at W=32 `pcq`.
