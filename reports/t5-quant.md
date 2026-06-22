@@ -215,11 +215,11 @@ coherence. The first generated tokens do not match the FP/int16 oracle sequence
 
 Verified: attempt 1 hybrid/w8a16 is blocked in ACUITY quantize-table emission.
 Attempt 2 mixed PCQ exports and runs on the NPU, but fails the coherence gate.
+Attempt 3 mixed+hybrid repeats the ACUITY quantize-table emission blocker.
 
-## Next
+## Attempt 3: Mixed Seed + ACUITY Hybrid
 
-Verified next action: attempt 3, combining the mixed seed with ACUITY hybrid
-quantization:
+Verified command:
 
 ```bash
 scripts/host/convert_onnx_to_nbg.sh \
@@ -234,6 +234,55 @@ scripts/host/convert_onnx_to_nbg.sh \
   --hybrid-seed-quantize work/generated/smollm2_135m_w32_mixed_pcq/smollm2_135m_w32_mixed_pcq_pcq.quantize
 ```
 
-Risk: previous hybrid runs reached graph transformation but became stuck while
-dumping the rewritten YAML quantize table. If attempt 3 repeats that blocker,
-collect the logs and escalate T6/vendor with the preserved hybrid artifacts.
+Verified logs:
+
+```text
+logs/host/t5-smollm2-w32-mixed-hybrid-pcq-convert.log
+logs/host/t5-smollm2-w32-mixed-hybrid-pcq-convert.err.log
+```
+
+Verified result: ACUITY imported the graph, loaded the mixed seed table, inserted
+587 `dtype_converter` ops in
+`smollm2_135m_w32_mixed_hybrid_pcq_pcq.quantize.json`, reached:
+
+```text
+End quantization...
+Dump net quantize tensor table to .../smollm2_135m_w32_mixed_hybrid_pcq_pcq.quantize
+```
+
+After that, the YAML table remained:
+
+```text
+work/ai-sdk/ZIFENG278-ai-sdk/models/smollm2_135m_w32_mixed_hybrid_pcq/smollm2_135m_w32_mixed_hybrid_pcq_pcq.quantize
+size: 0 bytes
+```
+
+Verified: after an additional 90 seconds the file was still 0 bytes and the
+Docker container was still CPU-active at about 99.6 percent with 2.6 GiB RSS.
+The T5-only container `strange_burnell` was stopped. No NBG package was
+produced.
+
+Conclusion for attempt 3: combining mixed seed with hybrid does not reach
+inference/export because it repeats the ACUITY hybrid quantize-table dump
+blocker.
+
+## T6 Vendor Escalation
+
+All T5 recovery attempts are now accounted for:
+
+- `w8a16` / ACUITY hybrid: blocked while dumping rewritten `.quantize`.
+- mixed precision seed: exports and runs on NPU, smaller/faster than int16, but
+  generated tokens are incoherent.
+- mixed seed + ACUITY hybrid: blocked while dumping rewritten `.quantize`.
+
+Vendor blocker is documented in:
+
+```text
+reports/t6-vendor-acuity-hybrid-quantize-table.md
+```
+
+## Next
+
+Use the T6 vendor blocker packet to ask for an ACUITY fix or workaround for
+hybrid quantize-table serialization. Without that, the only coherent
+SmolLM2-135M path remains W=32/W=64 int16 NPU.

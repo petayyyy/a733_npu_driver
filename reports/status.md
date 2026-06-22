@@ -527,6 +527,16 @@
     `260 260 260 357 260 2581`; chat-wrapper generated text started
     `the the the the  the Kaw...`, not the FP/int16 oracle
     `504 3575 282 4649 314 7042` / `The capital of France is Paris`.
+  - Verified attempt 3 mixed seed + ACUITY hybrid:
+    `smollm2_135m_w32_mixed_hybrid_pcq`. ACUITY loaded the mixed seed, inserted
+    587 `dtype_converter` ops, reached `End quantization...` / `Dump net
+    quantize tensor table`, then truncated
+    `smollm2_135m_w32_mixed_hybrid_pcq_pcq.quantize` to `0` bytes and stayed
+    CPU-active at about 99.6 percent. Stopped only the T5 container
+    `strange_burnell`; no NBG package was produced.
+  - T5 outcome: all prescribed recovery attempts failed or blocked. Coherent
+    SmolLM2 remains W=32/W=64 int16 only. Vendor blocker packet added at
+    `reports/t6-vendor-acuity-hybrid-quantize-table.md`.
 
 ## Next Gate
 
@@ -539,6 +549,6 @@ runnable partial ceiling at 7 Qwen decoder layers (`W=32`, `pcq`,
 `network_binary.nb=357,150,496`, peak RSS `350,496 KB`); 8 layers exports on
 host but is too large for this board runtime.
 
-T5 resume point: attempt 3 by combining the mixed seed with ACUITY hybrid
-quantization. If it repeats the prior hybrid quantize-table dump blocker,
-preserve logs/artifacts and escalate T6/vendor.
+T5 resume point: wait for ACUITY/vendor fix or workaround for hybrid
+quantize-table serialization; no further local int8/hybrid recovery path is
+currently unblocked.
