@@ -354,11 +354,34 @@
     this environment: Paramiko reports `WinError 10013`, `ping 192.168.31.76`
     reports `General failure`, and OpenSSH reports `Permission denied` while
     connecting to port 22.
+  - Network access later recovered; verified Radxa at `192.168.31.76`, host
+    `radxa-cubie-a7z`, `/home/radxa` had `23G` free before upload.
+  - Uploaded full Qwen W=32 `int16` package to
+    `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_int16`.
+  - Verified full Qwen W=32 `int16` board smoke is blocked by board RAM:
+    runner exited `137`, `run.log` stayed empty, peak RSS reached
+    `641,340 KB`, and board memory after the kill was `959Mi` total with
+    `641Mi` available. The NBG is `1,064,540,800` bytes, so it does not fit
+    this 1GiB board configuration.
+  - Uploaded and ran Qwen W=32 one-layer `pcq` diagnostic package on A733 NPU:
+    `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer1_pcq`.
+    - `network_binary.nb` size: `274,904,704` bytes.
+    - Runtime: VIPLite `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`,
+      int32 input `1x32`, int8 asymmetric output `1x1x151936`,
+      `memory_pool_bytes=214016`, `nbg_loaded_once=1`, `status=0`.
+    - Timing: create network `583.531ms`, prepare `0.744ms`, first-step wall
+      `46.465ms`, first-step NPU profile `19.217ms`, mean wall
+      `45.572ms/token`, mean NPU profile `19.197ms/token`, `21.943 tok/s`,
+      peak RSS `270,220 KB`.
+    - Generated diagnostic layer1 tokens: `56446 56446 56446 732`
+      (`forgettableforgettableforgettable im`). This is a Qwen-shaped NPU
+      execution control, not a coherence pass, because it has only one decoder
+      layer.
 
 ## Next Gate
 
-T4 Qwen resume point: restore host-to-board SSH/network access, then upload and
-run the full Qwen W=32 `int16` package on the A733 NPU through the persistent
-runner with `--seq-len 32 --vocab 151936`. The requested full Qwen `pcq` path is
-blocked in ACUITY quantize-table serialization/rebuild; the one-layer Qwen
-`pcq` package is the passing diagnostic control.
+T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
+1GiB Radxa board; full Qwen `pcq` is the viable memory target but is currently
+blocked in ACUITY quantize-table serialization/rebuild. Next step is to unblock
+or bisect the full Qwen `pcq` conversion; the one-layer Qwen `pcq` NBG is the
+passing hardware diagnostic control.

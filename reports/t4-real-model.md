@@ -524,6 +524,72 @@ ssh radxa@192.168.31.76: Permission denied while connecting to port 22
 This is a connectivity/permission blocker from the current host environment,
 not a Qwen NBG export blocker and not a reason to request board power cycling.
 
+After network access recovered, uploaded the full Qwen W=32 `int16` package to
+the Radxa:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_int16
+network_binary.nb: 1,064,540,800 bytes
+board free space before upload: 23G
+```
+
+Verified full Qwen W=32 `int16` board smoke is blocked by board RAM:
+
+```text
+logs/board/qwen25_05b_w32_int16_smoke-run.log
+logs/board/qwen25_05b_w32_int16_smoke-rss.env
+runner status: 137
+peak_rss_kb: 641,340
+run.log: empty
+board memory after kill: 959Mi total, 641Mi available, 2.3Gi swap available
+```
+
+Interpretation: the 1.016GiB Qwen `int16` NBG does not fit on the current
+1GiB Radxa board configuration. The process was killed before the runner could
+print VIPLite metadata or execute the graph.
+
+Uploaded and ran the Qwen W=32 one-layer `pcq` diagnostic package on the A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer1_pcq
+logs/board/qwen25_05b_w32_layer1_pcq_smoke-run.log
+logs/board/qwen25_05b_w32_layer1_pcq_smoke-rss.env
+network_binary.nb: 274,904,704 bytes
+VIPLite: 2.0.3.2-AW-2024-08-30
+cid: 0x1000003b
+input: int32 1x32
+output: int8 asymmetric affine 1x1x151936
+memory_pool_bytes: 214,016
+nbg_loaded_once: 1
+status: 0
+```
+
+Verified Qwen layer1 `pcq` persistent-runner timing:
+
+```text
+create_network_us=583531
+prepare_network_us=744
+first_step_wall_us=46465
+first_step_profile_us=19217
+mean_wall_us=45572.250
+mean_profile_us=19196.750
+mean_tok_s=21.943
+peak_rss_kb=270220
+```
+
+Generated layer1 diagnostic tokens:
+
+```text
+56446 56446 56446 732
+decoded: forgettableforgettableforgettable im
+```
+
+This is not a coherence result because the graph contains only one decoder
+layer. It is a hardware control proving that a Qwen-shaped fixed-window graph
+with Qwen tokenizer windows, q/k/v bias, RoPE, GQA, large-vocabulary sliced
+logits, and `pcq` output can execute on the A733 NPU through the persistent
+runner.
+
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
@@ -533,13 +599,13 @@ converts and executes but fails coherence at `W=32`.
 Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
 `pcq` quantization stalls after `End quantization`, but a one-layer Qwen `pcq`
 diagnostic export passes and the full 24-layer `int16` control export passes.
-The next gate is uploading the full Qwen W=32 `int16` NBG, or a later full
-`pcq` retry if ACUITY's quantize-table stall can be avoided, to the A733 NPU.
+On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while the
+one-layer Qwen `pcq` diagnostic NBG runs successfully on the NPU.
 
 ## Next
 
-Restore host-to-board SSH/network access, then upload and run
-`work/model-packages/qwen25_05b_w32_int16/int16/` on the A733 through the
-persistent runner with `--seq-len 32 --vocab 151936`. For the requested int8
-path, retry full Qwen `pcq` only after addressing the ACUITY quantize-table
-stall; the one-layer Qwen `pcq` package is available as the diagnostic control.
+For a full Qwen board run on this 1GiB Radxa, the viable path is a full `pcq`
+or smaller-than-int16 package. The current blocker is ACUITY full-Qwen `pcq`
+quantize-table serialization/rebuild. If that cannot be cleared, continue with
+layer-count bisection or a smaller model/graph; full Qwen `int16` is too large
+for the board RAM.
