@@ -450,6 +450,30 @@
       (`!ascus棰主义`). Bisection result: 7 Qwen decoder layers run as `pcq`;
       8 layers export on host but are killed before VIPLite metadata on this
       1GiB board/runtime path.
+  - Added `scripts/host/make_qwen2_pcq_seed.py` and generated a synthetic
+    full-Qwen seeded PCQ table from the full `int16` ACUITY metadata plus the
+    Hugging Face safetensors:
+    `work/generated/qwen25_05b_w32_seed_pcq/qwen25_05b_w32_seed_pcq_pcq.quantize`,
+    size `26,158,665` bytes. The seed contains `1,991` int8 qparams, `169`
+    int32 bias qparams, and `338` per-channel `channel_dim` entries covering
+    all `169` fullconnect weights/biases.
+  - Verified the first seeded full-Qwen `pcq` run failed at qtable load with
+    `Missing channel_dim attribute`; after adding `channel_dim: -1` for weights
+    and `channel_dim: 0` for biases, ACUITY loaded the seed table and bypassed
+    the original full-Qwen `End quantization...`/zero-byte-table stall.
+  - Verified the seeded full-Qwen `pcq` retry reaches export and packs all
+    fullconnect weights/biases, but still produces no NBG:
+    - Quantized inference fails on the final last-token/logits path with
+      `ValueError: Invalid value in tensor used for shape: -30`.
+    - `gen_nbg` fails with
+      `Cannot calculate the reshape tensor 4294107136 to 4294106880`,
+      `Setup node[1666] RESHAPE2 fail`, and
+      `Fatal model generation error: 65280`.
+    - Logs:
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.log`,
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.err.log`,
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.retry1.log`, and
+      `logs/host/t4-qwen25-05b-w32-seed-pcq-convert.retry1.err.log`.
 - Task T5 SmolLM2 int8-quality continuation:
   - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
     reached `End quantization...` / `Dump net quantize tensor table` and then
@@ -477,11 +501,13 @@
 ## Next Gate
 
 T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
-1GiB Radxa board; full Qwen `pcq` is the viable memory target but is currently
-blocked in ACUITY quantize-table serialization/rebuild. Hardware bisection on
-this board found the current runnable partial ceiling at 7 Qwen decoder layers
-(`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS `350,496 KB`); 8
-layers exports on host but is too large for this board runtime.
+1GiB Radxa board; full Qwen `pcq` is the viable memory target. The normal full
+`pcq` route stalls at ACUITY quantize-table emission, while the synthetic seeded
+PCQ route loads the table and reaches export/`gen_nbg` but fails in the final
+slice/logits path with negative shape `-30` and a VIP `RESHAPE2` setup error.
+Hardware bisection on this board found the current runnable partial ceiling at
+7 Qwen decoder layers (`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS
+`350,496 KB`); 8 layers exports on host but is too large for this board runtime.
 
 T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
 upload and compare the first six generated tokens against the FP/int16 oracle
