@@ -228,10 +228,58 @@
       in the conversion logs.
   - Next: upload the W=32 `pcq` package to the Radxa and run it with the T1
     persistent runner.
-- Report started: `reports/t4-real-model.md`.
+  - Verified original one-sample `pcq` package runs on the A733 through the T1
+    persistent runner, but fails coherence:
+    `... assistant the the the  the the ** ...`; mean wall `34.243ms/token`,
+    mean NPU profile `25.632ms/token`, `29.203 tok/s`.
+  - Added a 12-window representative calibration dataset and rebuilt `pcq`.
+    Verified package path:
+    `work/model-packages/smollm2_135m_w32_calib/pcq/`; NBG size
+    `153,984,304` bytes; final export `Error(0),Warning(0)`.
+  - Verified calibrated `pcq` package runs on the A733 through the persistent
+    runner, but still fails coherence:
+    `... assistant the  the$ interspers strugg ...`; mean wall
+    `30.187ms/token`, mean NPU profile `25.541ms/token`, `33.127 tok/s`.
+  - Verified calibrated `pcq` exact-sample mismatch:
+    - CPU FP fixed-window oracle first token for `The capital of France is`:
+      token `253` (`" a"`).
+    - ACUITY host `pcq` top-1: token `37353`.
+    - A733 NPU `pcq` top-1: token `2581`.
+    - Board-vs-host cosine for that sample: `0.992959037`, but top-5 index
+      match `no`.
+  - Added an int16 correctness-control export for the same W=32 graph.
+    - Package path: `work/model-packages/smollm2_135m_w32_int16/int16/`.
+    - `network_binary.nb` size: `280,882,632` bytes.
+    - Final NBG export: `Error(0),Warning(0)`.
+    - Output metadata: int16 dynamic fixed point, `fl=10`, shape
+      `1x1x49152`.
+  - Verified int16 SmolLM2 W=32 runs on the A733 through the T1 persistent
+    runner and produces coherent text:
+    `The capital of France is Paris, located in the northern part of the country.`
+  - Verified CPU oracle for the same prompt starts:
+    `The capital of France is Paris. Paris is a city located in the northern part`.
+    The first six generated tokens match exactly:
+    `504 3575 282 4649 314 7042` (`The capital of France is Paris`).
+  - Verified int16 benchmark with RSS sampler:
+    create network `296.038ms`, prepare `7.281ms`, first-step wall
+    `46.046ms`, first-step NPU profile `41.052ms`, mean wall
+    `46.905ms/token`, mean NPU profile `41.883ms/token`, `21.320 tok/s`,
+    peak RSS `278,176 KB`.
+  - Verified usable context window is currently fixed `W=32`; the graph
+    recomputes the full window each decode step and does not use a KV cache.
+  - Result: SmolLM2-135M-Instruct passes the NPU-only coherent-text gate with
+    `int16`; the requested `pcq` int8 path is a precise quality blocker, not an
+    op-support or NBG-size blocker.
+- Reports/scripts added for T4:
+  - `reports/t4-real-model.md`
+  - `scripts/host/make_real_llm_onnx.py`
+  - `scripts/host/smollm2_tokenizer.py`
+  - `scripts/host/smollm2_numpy_reference.py`
+  - `scripts/host/make_smollm2_calibration.py`
+  - `scripts/board/run-npu-lm-runner-rss.sh`
 
 ## Next Gate
 
-Continue T4: run SmolLM2-135M-Instruct W=32 board validation with the persistent
-runner. Do not start T5 or T6 unless T4 reaches its success gate or a precise
-blocker.
+T4 branch point: if int8 is mandatory, proceed to T6 with the SmolLM2 `pcq`
+quality blocker. If int16 is acceptable for the first real-model T4 gate, try
+SmolLM2 `W=64` next before attempting Qwen2.5-0.5B.
