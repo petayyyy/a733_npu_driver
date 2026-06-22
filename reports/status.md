@@ -96,6 +96,30 @@
 
 ## 2026-06-22
 
+- T0 done: added reusable ACUITY conversion infrastructure.
+  - `scripts/host/convert_onnx_to_nbg.sh` runs ONNX import, quantization,
+    ACUITY host inference, and A733 NBG export inside Docker image
+    `ubuntu-npu:v2.0.10.1` for target
+    `VIP9000NANODI_PLUS_PID0X1000003B`.
+  - `scripts/host/compare_outputs.py` compares ACUITY host golden output with
+    board `output_0.txt` and reports top-5 index match, max/mean abs diff,
+    RMSE, and cosine.
+  - Fixed a reproducibility issue in generated ACUITY input metadata for `.npy`
+    tensor datasets: verified `tiny_lm_gather` token IDs stay `1 5 9 2`
+    instead of being reversed as image channels.
+- T0 verified on hardware: regenerated `tiny_lm_gather` int16 package with one
+  host command, uploaded it to the Radxa board, and ran it through
+  `/home/radxa/ai-sdk/examples/vpm_run/vpm_run`.
+  - ACUITY export ended with `Error(0),Warning(0)`.
+  - Package path: `work/model-packages/tiny_lm_gather/int16/`.
+  - Board path: `/home/radxa/a733_npu_driver/models/tiny_lm_gather_t0_int16`.
+  - Board run logged VIPLite `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`, and
+    `vpm run ret=0`.
+  - `compare_outputs.py` result vs board `output_0.txt`: top-5 index match
+    `yes`, max abs diff `0.000610352`, mean abs diff `0.000153542`, RMSE
+    `0.000204006`, cosine `0.999999929`.
+- T0 report written: `reports/t0-acuity-flow.md`.
+
 - Task T1 passed on the Radxa Cubie A7Z: added a persistent VIPLite C runner
   for the existing tiny LM NBG.
   - Source/build/run helpers:
