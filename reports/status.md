@@ -377,6 +377,28 @@
       (`forgettableforgettableforgettable im`). This is a Qwen-shaped NPU
       execution control, not a coherence pass, because it has only one decoder
       layer.
+  - Verified Qwen W=32 four-layer `pcq` diagnostic export and NPU run:
+    - ONNX: `work/generated/qwen25_05b_w32_layer4/real_llm.onnx`, size
+      `783,186,037` bytes.
+    - ACUITY import, quantize, inference, and export completed; final export
+      `Error(0),Warning(0)`.
+    - The current dirty `scripts/host/convert_onnx_to_nbg.sh` T5 edits caused
+      a post-export packaging syntax error, so the NBG was manually packaged
+      from ACUITY's `_nbg_unify` directory.
+    - Board path:
+      `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer4_pcq`.
+    - `network_binary.nb` size: `316,117,184` bytes.
+    - Runtime: VIPLite `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`,
+      int32 input `1x32`, int8 asymmetric output `1x1x151936`,
+      `memory_pool_bytes=214016`, `nbg_loaded_once=1`, `status=0`.
+    - Timing: create network `416.151ms`, prepare `1.181ms`, first-step wall
+      `47.515ms`, first-step NPU profile `26.347ms`, mean wall
+      `42.212ms/token`, mean NPU profile `26.255ms/token`, `23.690 tok/s`,
+      peak RSS `309,920 KB`.
+    - Generated diagnostic layer4 tokens: `0 52643 120889 100091`
+      (`!ascus棰主义`). This narrows the `pcq` blocker: 4 real Qwen decoder
+      layers export and run; 24 layers stall during ACUITY quantize-table
+      serialization/rebuild.
 - Task T5 SmolLM2 int8-quality continuation:
   - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
     reached `End quantization...` / `Dump net quantize tensor table` and then
@@ -406,8 +428,8 @@
 T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
 1GiB Radxa board; full Qwen `pcq` is the viable memory target but is currently
 blocked in ACUITY quantize-table serialization/rebuild. Next step is to unblock
-or bisect the full Qwen `pcq` conversion; the one-layer Qwen `pcq` NBG is the
-passing hardware diagnostic control.
+or bisect the full Qwen `pcq` conversion above four layers; one-layer and
+four-layer Qwen `pcq` NBGs are passing hardware diagnostic controls.
 
 T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
 upload and compare the first six generated tokens against the FP/int16 oracle

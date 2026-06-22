@@ -590,6 +590,69 @@ with Qwen tokenizer windows, q/k/v bias, RoPE, GQA, large-vocabulary sliced
 logits, and `pcq` output can execute on the A733 NPU through the persistent
 runner.
 
+## Qwen2.5-0.5B Layer Bisection
+
+Verified Qwen W=32 four-layer `pcq` diagnostic export:
+
+```text
+work/generated/qwen25_05b_w32_layer4/real_llm.onnx  783,186,037 bytes
+logs/host/t4-qwen25-05b-w32-layer4-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-layer4-pcq-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+inference: completed
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 316,117,184 bytes
+output: int8 asymmetric affine, shape 1x1x151936
+ACUITY export simulator: create network 1.726s, verify 19.259s, one run 6.279s
+```
+
+Note: the local wrapper exited `2` after ACUITY export because the currently
+dirty `scripts/host/convert_onnx_to_nbg.sh` T5 edits have a post-export
+packaging syntax issue. The NBG itself was already exported successfully, so
+the package was assembled manually from ACUITY's `_nbg_unify` directory for the
+board smoke.
+
+Uploaded and ran the Qwen W=32 four-layer `pcq` diagnostic package on the A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer4_pcq
+logs/board/qwen25_05b_w32_layer4_pcq_smoke-run.log
+logs/board/qwen25_05b_w32_layer4_pcq_smoke-rss.env
+network_binary.nb: 316,117,184 bytes
+VIPLite: 2.0.3.2-AW-2024-08-30
+cid: 0x1000003b
+input: int32 1x32
+output: int8 asymmetric affine 1x1x151936
+memory_pool_bytes: 214,016
+nbg_loaded_once: 1
+status: 0
+```
+
+Verified Qwen layer4 `pcq` persistent-runner timing:
+
+```text
+create_network_us=416151
+prepare_network_us=1181
+first_step_wall_us=47515
+first_step_profile_us=26347
+mean_wall_us=42211.500
+mean_profile_us=26254.750
+mean_tok_s=23.690
+peak_rss_kb=309920
+```
+
+Generated layer4 diagnostic tokens:
+
+```text
+0 52643 120889 100091
+decoded: !ascus棰主义
+```
+
+This is still a partial-model diagnostic, not a coherence result. It narrows
+the Qwen `pcq` blocker: 4 real decoder layers export and run; 24 layers stall
+inside ACUITY quantize-table serialization/rebuild.
+
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
@@ -599,13 +662,14 @@ converts and executes but fails coherence at `W=32`.
 Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
 `pcq` quantization stalls after `End quantization`, but a one-layer Qwen `pcq`
 diagnostic export passes and the full 24-layer `int16` control export passes.
-On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while the
-one-layer Qwen `pcq` diagnostic NBG runs successfully on the NPU.
+On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while
+one-layer and four-layer Qwen `pcq` diagnostic NBGs run successfully on the
+NPU.
 
 ## Next
 
 For a full Qwen board run on this 1GiB Radxa, the viable path is a full `pcq`
 or smaller-than-int16 package. The current blocker is ACUITY full-Qwen `pcq`
 quantize-table serialization/rebuild. If that cannot be cleared, continue with
-layer-count bisection or a smaller model/graph; full Qwen `int16` is too large
-for the board RAM.
+layer-count bisection above four layers or a smaller model/graph; full Qwen
+`int16` is too large for the board RAM.
