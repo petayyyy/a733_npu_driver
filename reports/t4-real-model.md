@@ -686,6 +686,60 @@ Interpretation: eight Qwen decoder layers export successfully as `pcq`, but the
 370.7MB NBG is already too large for this 1GiB board/runtime path; the process
 is killed before VIPLite metadata is printed.
 
+Verified Qwen W=32 six-layer `pcq` diagnostic export and board run:
+
+```text
+work/generated/qwen25_05b_w32_layer6/real_llm.onnx  902,496,845 bytes
+logs/host/t4-qwen25-05b-w32-layer6-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-layer6-pcq-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+inference: completed
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 343,479,520 bytes
+output: int8 asymmetric affine, shape 1x1x151936
+ACUITY export simulator: create network 2.024s, verify 22.336s, one run 8.180s
+```
+
+Uploaded and ran the Qwen W=32 six-layer `pcq` diagnostic package on the A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer6_pcq
+logs/board/qwen25_05b_w32_layer6_pcq_smoke-run.log
+logs/board/qwen25_05b_w32_layer6_pcq_smoke-rss.env
+network_binary.nb: 343,479,520 bytes
+VIPLite: 2.0.3.2-AW-2024-08-30
+cid: 0x1000003b
+input: int32 1x32
+output: int8 asymmetric affine 1x1x151936
+memory_pool_bytes: 214,016
+nbg_loaded_once: 1
+status: 0
+```
+
+Verified Qwen layer6 `pcq` persistent-runner timing:
+
+```text
+create_network_us=1336110
+prepare_network_us=1727
+first_step_wall_us=48751
+first_step_profile_us=31180
+mean_wall_us=46503.500
+mean_profile_us=31126.250
+mean_tok_s=21.504
+peak_rss_kb=334696
+```
+
+Generated layer6 diagnostic tokens:
+
+```text
+0 52643 120889 100091
+decoded: !ascus棰主义
+```
+
+This narrows the board runtime threshold for this Qwen `pcq` partial graph:
+six decoder layers run, while eight layers are killed before network metadata.
+
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
@@ -696,9 +750,9 @@ Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
 `pcq` quantization stalls after `End quantization`, but a one-layer Qwen `pcq`
 diagnostic export passes and the full 24-layer `int16` control export passes.
 On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while
-one-layer and four-layer Qwen `pcq` diagnostic NBGs run successfully on the
-NPU. Eight-layer Qwen `pcq` exports on host but is killed on the board before
-network creation completes.
+one-layer, four-layer, and six-layer Qwen `pcq` diagnostic NBGs run
+successfully on the NPU. Eight-layer Qwen `pcq` exports on host but is killed
+on the board before network creation completes.
 
 ## Next
 

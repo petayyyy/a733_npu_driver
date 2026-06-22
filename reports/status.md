@@ -411,6 +411,25 @@
       memory after kill was `959Mi` total with `649Mi` available. Eight Qwen
       decoder layers export as `pcq`, but this NBG is too large for the current
       1GiB board/runtime path.
+  - Verified Qwen W=32 six-layer `pcq` diagnostic export and NPU run:
+    - ONNX: `work/generated/qwen25_05b_w32_layer6/real_llm.onnx`, size
+      `902,496,845` bytes.
+    - ACUITY import, quantize, inference, and export completed; final export
+      `Error(0),Warning(0)`.
+    - `work/model-packages/qwen25_05b_w32_layer6/pcq/network_binary.nb`, size
+      `343,479,520` bytes.
+    - Board path:
+      `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer6_pcq`.
+    - Runtime: VIPLite `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`,
+      int32 input `1x32`, int8 asymmetric output `1x1x151936`,
+      `memory_pool_bytes=214016`, `nbg_loaded_once=1`, `status=0`.
+    - Timing: create network `1,336.110ms`, prepare `1.727ms`,
+      first-step wall `48.751ms`, first-step NPU profile `31.180ms`,
+      mean wall `46.504ms/token`, mean NPU profile `31.126ms/token`,
+      `21.504 tok/s`, peak RSS `334,696 KB`.
+    - Generated diagnostic layer6 tokens: `0 52643 120889 100091`
+      (`!ascus棰主义`). This narrows the board runtime threshold: 6 Qwen
+      decoder layers run, 8 layers export but are killed on this 1GiB runtime.
 - Task T5 SmolLM2 int8-quality continuation:
   - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
     reached `End quantization...` / `Dump net quantize tensor table` and then
@@ -440,8 +459,8 @@
 T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
 1GiB Radxa board; full Qwen `pcq` is the viable memory target but is currently
 blocked in ACUITY quantize-table serialization/rebuild. Next step is to unblock
-or bisect the full Qwen `pcq` conversion between four and eight layers; one-
-layer and four-layer Qwen `pcq` NBGs are passing hardware diagnostic controls,
+or bisect the full Qwen `pcq` conversion between six and eight layers; one-,
+four-, and six-layer Qwen `pcq` NBGs are passing hardware diagnostic controls,
 while eight layers exports on host but is too large for this board runtime.
 
 T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
