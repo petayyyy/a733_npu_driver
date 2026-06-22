@@ -384,21 +384,118 @@ mean_tok_s=14.356
 peak_rss_kb=280904
 ```
 
-Verified usable context window is now `W=64` on the int16 path. Assumption:
-Qwen2.5-0.5B should wait because the requested SmolLM2 `pcq` path already has a
-quality blocker, and Qwen would multiply the same risk with much larger weights
-and a much larger vocabulary.
+Verified usable context window is now `W=64` on the int16 path.
+
+## Qwen2.5-0.5B W=32 Setup
+
+After the user explicitly requested continuing T4 with Qwen despite the SmolLM2
+`pcq` quality blocker, started the Qwen2.5-0.5B-Instruct path.
+
+Verified downloaded Hugging Face files:
+
+```text
+work/models/qwen25-0.5b-instruct/config.json                  659 bytes
+work/models/qwen25-0.5b-instruct/generation_config.json       242 bytes
+work/models/qwen25-0.5b-instruct/model.safetensors      988,097,824 bytes
+work/models/qwen25-0.5b-instruct/tokenizer.json         7,031,645 bytes
+work/models/qwen25-0.5b-instruct/tokenizer_config.json       7,305 bytes
+```
+
+Verified Qwen config:
+
+```text
+model_type=qwen2
+hidden_size=896
+intermediate_size=4864
+num_hidden_layers=24
+num_attention_heads=14
+num_key_value_heads=2
+head_dim=64
+vocab_size=151936
+rope_theta=1000000.0
+rms_norm_eps=1e-6
+tie_word_embeddings=true
+```
+
+Updated the fixed-window real-LM ONNX generator for Qwen:
+
+- q/k/v projection biases are now represented in the ONNX graph.
+- Missing q/k/v biases remain supported as zero tensors for SmolLM2.
+- The tied `lm_head` is now represented as `Transpose(token_embed)` instead of
+  duplicating the embedding initializer; this kept the Qwen ONNX below the
+  protobuf-size cliff.
+
+Added Qwen host helpers:
+
+```text
+scripts/host/qwen2_tokenizer.py
+scripts/host/make_qwen2_calibration.py
+```
+
+Verified diagnostic one-layer Qwen W=32 ONNX generation:
+
+```text
+work/generated/qwen25_05b_w32_layer1/real_llm.onnx  604,219,825 bytes
+```
+
+Verified full Qwen2.5-0.5B-Instruct W=32 ONNX generation:
+
+```text
+work/generated/qwen25_05b_w32/real_llm.onnx  1,976,297,294 bytes
+layers=24
+output=last-token logits
+lm_head=transpose(model.embed_tokens.weight)
+```
+
+Verified Qwen W=32 calibration dataset:
+
+```text
+work/generated/qwen25_05b_w32_calib/dataset.txt  12 calibration windows
+pad_token_id=151643
+```
+
+Started ACUITY `pcq` conversion for the full Qwen W=32 graph:
+
+```text
+logs/host/t4-qwen25-05b-w32-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-pcq-convert.err.log
+container=tender_buck
+```
+
+Current observed state:
+
+```text
+ONNX import: SUCCESS
+qwen25_05b_w32.data: 2,521,343,935 bytes
+entropy.txt: 67,137 bytes
+last log line: End quantization / Dump net quantize tensor table
+container status: still running
+active process: python3 pegasus.py quantize
+elapsed in quantize: about 50 minutes at observation time
+CPU: about 100%
+RSS: about 5.0 GiB
+qwen25_05b_w32_pcq.quantize: 0 bytes at observation time
+```
+
+Interpretation: the Qwen `pcq` path had not crashed at observation time. It was
+still inside ACUITY quantize after printing `End quantization`, likely in a
+large in-memory rebuild or final serialization stage. No Qwen NBG had been
+exported yet at this checkpoint.
 
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
 `int16` at both `W=32` and `W=64`. Verified: the requested `pcq` int8 path
-converts and executes but fails coherence at `W=32`; treat that as the precise
-int8 blocker before attempting Qwen2.5-0.5B as an int8 deliverable.
+converts and executes but fails coherence at `W=32`.
+
+Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation and ACUITY
+`pcq` quantization is in progress. The next gate is whether ACUITY completes
+the Qwen `pcq` package export, and if so whether the package runs coherently on
+the A733 NPU.
 
 ## Next
 
-If int8 is mandatory, proceed to T6 with the `pcq` quality blocker and include
-the logs above. If int16 is accepted for T4, SmolLM2 has passed at `W=64`; the
-next step is either Qwen2.5-0.5B sizing/conversion or T5 porting, depending on
-whether the `pcq` blocker must be resolved first.
+Continue monitoring `tender_buck`. If it completes, package and upload the Qwen
+W=32 `pcq` NBG to the Radxa and run the persistent NPU LM runner. If it stalls
+or fails, record the exact ACUITY blocker and retry with the smallest useful
+variant, such as a layer-limited diagnostic graph or int16 control export.

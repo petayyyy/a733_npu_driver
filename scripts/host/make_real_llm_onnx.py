@@ -55,6 +55,14 @@ class SafeTensorReader:
             return np.frombuffer(data, dtype="<f2").astype(np.float32).reshape(shape)
         raise ValueError(f"unsupported tensor dtype for {name}: {dtype}")
 
+    def optional_tensor(self, name: str, shape: tuple[int, ...]) -> np.ndarray:
+        if name in self.header:
+            value = self.tensor(name)
+            if value.shape != shape:
+                raise ValueError(f"unexpected tensor shape for {name}: {value.shape}, expected {shape}")
+            return value
+        return np.zeros(shape, dtype=np.float32)
+
 
 def f32_tensor(name: str, value: np.ndarray) -> onnx.TensorProto:
     return numpy_helper.from_array(np.ascontiguousarray(value, dtype=np.float32), name=name)
@@ -153,6 +161,9 @@ def add_gqa_repeat(nodes: list[onnx.NodeProto], prefix: str, x: str) -> str:
 
 def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
     norm = add_rms_norm(nodes, f"{prefix}_attn_rms", hidden, f"{prefix}_attn_gamma")
+    q_linear = f"{prefix}_q_linear"
+    k_linear = f"{prefix}_k_linear"
+    v_linear = f"{prefix}_v_linear"
     q = f"{prefix}_q"
     k = f"{prefix}_k"
     v = f"{prefix}_v"
@@ -165,9 +176,12 @@ def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
 
     nodes.extend(
         [
-            helper.make_node("MatMul", [norm, f"{prefix}_wq"], [q], name=f"{prefix}_q_proj"),
-            helper.make_node("MatMul", [norm, f"{prefix}_wk"], [k], name=f"{prefix}_k_proj"),
-            helper.make_node("MatMul", [norm, f"{prefix}_wv"], [v], name=f"{prefix}_v_proj"),
+            helper.make_node("MatMul", [norm, f"{prefix}_wq"], [q_linear], name=f"{prefix}_q_proj"),
+            helper.make_node("MatMul", [norm, f"{prefix}_wk"], [k_linear], name=f"{prefix}_k_proj"),
+            helper.make_node("MatMul", [norm, f"{prefix}_wv"], [v_linear], name=f"{prefix}_v_proj"),
+            helper.make_node("Add", [q_linear, f"{prefix}_bq"], [q], name=f"{prefix}_q_bias"),
+            helper.make_node("Add", [k_linear, f"{prefix}_bk"], [k], name=f"{prefix}_k_bias"),
+            helper.make_node("Add", [v_linear, f"{prefix}_bv"], [v], name=f"{prefix}_v_bias"),
             helper.make_node("Reshape", [q, "shape_q"], [q_reshape], name=f"{prefix}_q_reshape"),
             helper.make_node("Reshape", [k, "shape_kv"], [k_reshape], name=f"{prefix}_k_reshape"),
             helper.make_node("Reshape", [v, "shape_kv"], [v_reshape], name=f"{prefix}_v_reshape"),
@@ -270,7 +284,6 @@ def build_initializers(reader: SafeTensorReader, config: dict[str, Any], seq: in
         f32_tensor("rope_sin", rope_sin),
         f32_tensor("token_embed", token_embed),
         f32_tensor("final_rms_gamma", reshape_gamma(reader.tensor("model.norm.weight"))),
-        f32_tensor("lm_head", linear_weight(token_embed)),
         i64_tensor("shape_q", [BATCH, seq, n_heads, head_dim]),
         i64_tensor("shape_kv", [BATCH, seq, n_kv_heads, head_dim]),
         i64_tensor("shape_kv_expand", [BATCH, n_kv_heads, 1, seq, head_dim]),
@@ -298,6 +311,15 @@ def build_initializers(reader: SafeTensorReader, config: dict[str, Any], seq: in
                 f32_tensor(f"{prefix}_wq", linear_weight(reader.tensor(f"{hf}.self_attn.q_proj.weight"))),
                 f32_tensor(f"{prefix}_wk", linear_weight(reader.tensor(f"{hf}.self_attn.k_proj.weight"))),
                 f32_tensor(f"{prefix}_wv", linear_weight(reader.tensor(f"{hf}.self_attn.v_proj.weight"))),
+                f32_tensor(f"{prefix}_bq", reader.optional_tensor(f"{hf}.self_attn.q_proj.bias", (dim,))),
+                f32_tensor(
+                    f"{prefix}_bk",
+                    reader.optional_tensor(f"{hf}.self_attn.k_proj.bias", (n_kv_heads * head_dim,)),
+                ),
+                f32_tensor(
+                    f"{prefix}_bv",
+                    reader.optional_tensor(f"{hf}.self_attn.v_proj.bias", (n_kv_heads * head_dim,)),
+                ),
                 f32_tensor(f"{prefix}_wo", linear_weight(reader.tensor(f"{hf}.self_attn.o_proj.weight"))),
                 f32_tensor(f"{prefix}_w_gate", linear_weight(reader.tensor(f"{hf}.mlp.gate_proj.weight"))),
                 f32_tensor(f"{prefix}_w_up", linear_weight(reader.tensor(f"{hf}.mlp.up_proj.weight"))),
@@ -372,6 +394,7 @@ def build_model(
             name="slice_last_hidden",
         )
     )
+    nodes.append(helper.make_node("Transpose", ["token_embed"], ["lm_head"], name="tie_lm_head_transpose", perm=[1, 0]))
     nodes.append(helper.make_node("MatMul", ["final_last_token", "lm_head"], ["logits"], name="logits"))
 
     reader = SafeTensorReader(model_dir / "model.safetensors")
@@ -422,6 +445,7 @@ def build_model(
                 "rope_theta": float(config.get("rope_theta", 10000.0)),
                 "rms_norm_eps": float(config.get("rms_norm_eps", 1e-5)),
                 "tie_word_embeddings": bool(config.get("tie_word_embeddings", False)),
+                "lm_head": "transpose(model.embed_tokens.weight)",
                 "output": "last-token logits",
                 "onnx_path": str(onnx_path),
             },

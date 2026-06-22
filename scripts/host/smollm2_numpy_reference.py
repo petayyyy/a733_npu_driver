@@ -24,6 +24,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from make_real_llm_onnx import SafeTensorReader  # noqa: E402
 from smollm2_tokenizer import DEFAULT_SYSTEM, parse_ids, render_chat  # noqa: E402
+from qwen2_tokenizer import DEFAULT_SYSTEM as QWEN2_DEFAULT_SYSTEM  # noqa: E402
+from qwen2_tokenizer import render_chat as render_qwen2_chat  # noqa: E402
 
 
 def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
@@ -91,6 +93,15 @@ class FixedWindowSmolLM2:
                         "q": reader.tensor(f"{prefix}.self_attn.q_proj.weight"),
                         "k": reader.tensor(f"{prefix}.self_attn.k_proj.weight"),
                         "v": reader.tensor(f"{prefix}.self_attn.v_proj.weight"),
+                        "qb": reader.optional_tensor(f"{prefix}.self_attn.q_proj.bias", (self.dim,)),
+                        "kb": reader.optional_tensor(
+                            f"{prefix}.self_attn.k_proj.bias",
+                            (self.n_kv_heads * self.head_dim,),
+                        ),
+                        "vb": reader.optional_tensor(
+                            f"{prefix}.self_attn.v_proj.bias",
+                            (self.n_kv_heads * self.head_dim,),
+                        ),
                         "o": reader.tensor(f"{prefix}.self_attn.o_proj.weight"),
                         "gate": reader.tensor(f"{prefix}.mlp.gate_proj.weight"),
                         "up": reader.tensor(f"{prefix}.mlp.up_proj.weight"),
@@ -105,9 +116,12 @@ class FixedWindowSmolLM2:
         hidden = self.weights["embed"][np.asarray(token_window, dtype=np.int64)].astype(np.float32)
         for layer in self.weights["layers"]:
             norm = rms_norm(hidden, layer["attn_norm"], self.eps)
-            q = (norm @ layer["q"].T).reshape(self.seq_len, self.n_heads, self.head_dim).transpose(1, 0, 2)
-            k = (norm @ layer["k"].T).reshape(self.seq_len, self.n_kv_heads, self.head_dim).transpose(1, 0, 2)
-            v = (norm @ layer["v"].T).reshape(self.seq_len, self.n_kv_heads, self.head_dim).transpose(1, 0, 2)
+            q = (norm @ layer["q"].T) + layer["qb"]
+            k = (norm @ layer["k"].T) + layer["kb"]
+            v = (norm @ layer["v"].T) + layer["vb"]
+            q = q.reshape(self.seq_len, self.n_heads, self.head_dim).transpose(1, 0, 2)
+            k = k.reshape(self.seq_len, self.n_kv_heads, self.head_dim).transpose(1, 0, 2)
+            v = v.reshape(self.seq_len, self.n_kv_heads, self.head_dim).transpose(1, 0, 2)
             q = apply_rope(q, self.cos, self.sin)
             k = apply_rope(k, self.cos, self.sin)
             k = np.repeat(k, self.kv_repeat, axis=0)
@@ -139,8 +153,12 @@ def resolve_prompt(args: argparse.Namespace, tokenizer: Tokenizer) -> tuple[str,
     if args.text is not None:
         text = args.text
     else:
-        system = DEFAULT_SYSTEM if args.default_system else args.system
-        text = render_chat(args.chat_user, system, not args.no_generation_prompt)
+        if args.chat_format == "qwen2":
+            system = QWEN2_DEFAULT_SYSTEM if args.default_system or args.system is None else args.system
+            text = render_qwen2_chat(args.chat_user, system, not args.no_generation_prompt)
+        else:
+            system = DEFAULT_SYSTEM if args.default_system else args.system
+            text = render_chat(args.chat_user, system, not args.no_generation_prompt)
     return text, tokenizer.encode(text).ids
 
 
@@ -151,6 +169,7 @@ def main() -> None:
     group.add_argument("--prompt-ids")
     group.add_argument("--text")
     group.add_argument("--chat-user")
+    parser.add_argument("--chat-format", choices=["smollm2", "qwen2"], default="smollm2")
     parser.add_argument("--system")
     parser.add_argument("--default-system", action="store_true")
     parser.add_argument("--no-generation-prompt", action="store_true")

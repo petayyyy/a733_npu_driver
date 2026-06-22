@@ -317,11 +317,35 @@
   - No T5 hybrid NBG package or board run yet; this is paused due to parallel
     Qwen work, not a hybrid quality result.
 - Report added: `reports/t5-quant.md`.
+- Task T4 Qwen continuation resumed per user request:
+  - Downloaded Qwen2.5-0.5B-Instruct model files under
+    `work/models/qwen25-0.5b-instruct/`; `model.safetensors` size is
+    `988,097,824` bytes.
+  - Updated `scripts/host/make_real_llm_onnx.py` for Qwen q/k/v projection
+    biases and tied `lm_head` via `Transpose(token_embed)` instead of a
+    duplicated embedding initializer.
+  - Added Qwen host helpers:
+    `scripts/host/qwen2_tokenizer.py` and
+    `scripts/host/make_qwen2_calibration.py`.
+  - Verified one-layer diagnostic Qwen W=32 ONNX generation:
+    `work/generated/qwen25_05b_w32_layer1/real_llm.onnx`, size
+    `604,219,825` bytes.
+  - Verified full Qwen2.5-0.5B-Instruct W=32 ONNX generation:
+    `work/generated/qwen25_05b_w32/real_llm.onnx`, size
+    `1,976,297,294` bytes; 24 layers, hidden size 896, 14 attention heads,
+    2 KV heads, vocab size 151,936.
+  - Created Qwen W=32 calibration dataset with 12 token windows:
+    `work/generated/qwen25_05b_w32_calib/dataset.txt`.
+  - Started ACUITY `pcq` conversion in Docker container `tender_buck`; ONNX
+    import succeeded and quantization reached `End quantization`, but at the
+    last check the active `pegasus.py quantize` process was still running at
+    about 100% CPU and 5.0 GiB RSS with
+    `qwen25_05b_w32_pcq.quantize` still 0 bytes.
 
 ## Next Gate
 
-T5 resume point: after the parallel Qwen2.5-0.5B Docker/board task is done or
-stopped, rerun the seeded SmolLM2 W=32 hybrid `pcq` conversion and continue the
-T5 attempt order. If the seed quantize-table dump is still stuck when run
-alone, seed the hybrid pass from the already verified
-`smollm2_135m_w32_calib_pcq.quantize` table before moving to mixed precision.
+T4 Qwen resume point: keep monitoring `tender_buck`. If Qwen `pcq` export
+completes, upload and run it on the A733 NPU through the persistent runner. If
+it stalls or fails, record the precise ACUITY blocker and run a smaller
+diagnostic or int16 control export before returning to the T5 hybrid `pcq`
+quality-fix branch.
