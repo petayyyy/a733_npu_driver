@@ -170,6 +170,34 @@
     host or board logs.
 - Report added: `reports/t2-faithful-block.md`.
 
+- Task T3 passed on the Radxa Cubie A7Z: added logits slicing and validated a
+  sliced-logits `pcq` int8 package for the faithful tiny decoder block.
+  - Updated generator: `scripts/host/make_tiny_faithful_block_onnx.py` now
+    supports `--logits full|last`, `--seed`, and `--tokens`.
+  - Updated comparison helper: `scripts/host/compare_outputs.py` now supports
+    `--golden-tail` and `--board-tail` for full-logits tail comparisons.
+  - Verified sliced graph shape: full final hidden `1x16x64` is sliced to
+    `1x1x64` before the final logits `MatMul`, producing `1x1x256` logits.
+  - Verified conversion packages:
+    `work/model-packages/tiny_faithful_block_t3_tokensA_full/int16/` and
+    `work/model-packages/tiny_faithful_block_t3_tokensA_last_logits/pcq/`.
+  - Verified board paths:
+    `/home/radxa/a733_npu_driver/models/tiny_faithful_block_t3_tokensA_full_int16`
+    and
+    `/home/radxa/a733_npu_driver/models/tiny_faithful_block_t3_tokensA_last_pcq`.
+  - Verified board runs logged VIPLite `2.0.3.2-AW-2024-08-30`,
+    `cid=0x1000003b`, and `vpm run ret=0` for both int16 and pcq packages.
+  - Verified last-position argmax is unchanged: full int16 last-position local
+    vocab argmax `250`; sliced pcq argmax `250`.
+  - Verified board profile times:
+    full int16 `182us`, `181us`, `211us`, `217us`, `212us`;
+    sliced pcq `160us`, `150us`, `150us`, `151us`, `150us`.
+  - Verified measured profile speedup: mean `200.6us` to `152.2us`,
+    `1.318x` faster, `24.13%` lower latency.
+  - Verified `vpm_run` reported `memory pool size=0byte` for both tiny graphs;
+    NBG size dropped from `409,136` bytes to `285,440` bytes.
+- Report added: `reports/t3-slice-int8.md`.
+
 ## Next Gate
 
 Await the next explicit task prompt. Do not start a new gate without a pasted

@@ -27,6 +27,7 @@ HEAD_DIM = DIM // N_HEADS
 KV_REPEAT = N_HEADS // N_KV_HEADS
 INTERMEDIATE = 192
 VOCAB = 256
+DEFAULT_TOKENS = (1, 5, 9, 2, 13, 21, 34, 55, 89, 144, 233, 3, 8, 15, 42, 7)
 
 
 def f32_tensor(name: str, value: np.ndarray) -> onnx.TensorProto:
@@ -230,6 +231,9 @@ def initializers(rng: np.random.Generator) -> list[onnx.TensorProto]:
         i64_tensor("slice_end_head", [HEAD_DIM]),
         i64_tensor("slice_axis_last", [3]),
         i64_tensor("slice_step_1", [1]),
+        i64_tensor("last_token_start", [SEQ - 1]),
+        i64_tensor("last_token_end", [SEQ]),
+        i64_tensor("sequence_axis", [1]),
     ]
 
     for layer in range(LAYERS):
@@ -256,10 +260,20 @@ def initializers(rng: np.random.Generator) -> list[onnx.TensorProto]:
     return values
 
 
-def build_model(output_dir: Path) -> None:
-    rng = np.random.default_rng(733)
+def parse_tokens(value: str) -> list[int]:
+    tokens = [int(part) for part in value.replace(",", " ").split()]
+    if len(tokens) != SEQ:
+        raise argparse.ArgumentTypeError(f"expected exactly {SEQ} token ids")
+    invalid = [token for token in tokens if token < 0 or token >= VOCAB]
+    if invalid:
+        raise argparse.ArgumentTypeError(f"token ids must be in [0, {VOCAB - 1}], got {invalid}")
+    return tokens
+
+
+def build_model(output_dir: Path, logits: str, seed: int, token_values: list[int]) -> None:
+    rng = np.random.default_rng(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
-    tokens = np.array([[1, 5, 9, 2, 13, 21, 34, 55, 89, 144, 233, 3, 8, 15, 42, 7]], dtype=np.int32)
+    tokens = np.asarray([token_values], dtype=np.int32)
 
     nodes: list[onnx.NodeProto] = [
         helper.make_node("Gather", ["token_embed", "token_ids"], ["hidden0"], name="token_gather", axis=0)
@@ -268,13 +282,26 @@ def build_model(output_dir: Path) -> None:
     for layer in range(LAYERS):
         hidden = add_decoder_layer(nodes, f"layer{layer}", hidden)
     final = add_rms_norm(nodes, "final_rms", hidden, "final_rms_gamma")
-    nodes.append(helper.make_node("MatMul", [final, "lm_head"], ["logits"], name="logits"))
+    logits_shape = [BATCH, SEQ, VOCAB]
+    logits_input = final
+    if logits == "last":
+        logits_input = "final_last_token"
+        logits_shape = [BATCH, 1, VOCAB]
+        nodes.append(
+            helper.make_node(
+                "Slice",
+                [final, "last_token_start", "last_token_end", "sequence_axis", "slice_step_1"],
+                [logits_input],
+                name="slice_last_hidden",
+            )
+        )
+    nodes.append(helper.make_node("MatMul", [logits_input, "lm_head"], ["logits"], name="logits"))
 
     graph = helper.make_graph(
         nodes,
         "tiny_faithful_block",
         [helper.make_tensor_value_info("token_ids", TensorProto.INT32, [BATCH, SEQ])],
-        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, SEQ, VOCAB])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, logits_shape)],
         initializers(rng),
     )
     model = helper.make_model(
@@ -301,8 +328,21 @@ def build_model(output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument(
+        "--logits",
+        choices=["full", "last"],
+        default="full",
+        help="emit logits for the full window or only the last autoregressive position",
+    )
+    parser.add_argument("--seed", type=int, default=733, help="deterministic RNG seed for generated weights")
+    parser.add_argument(
+        "--tokens",
+        type=parse_tokens,
+        default=list(DEFAULT_TOKENS),
+        help="16 token ids for the validation/calibration input; accepts space- or comma-separated values",
+    )
     args = parser.parse_args()
-    build_model(args.output_dir)
+    build_model(args.output_dir, args.logits, args.seed, args.tokens)
 
 
 if __name__ == "__main__":
