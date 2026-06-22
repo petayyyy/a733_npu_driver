@@ -142,9 +142,35 @@
     shell loop that also included process launch, Python/file I/O, and logging.
 - Report added: `reports/t1-persistent-runner.md`.
 
+- Task T2 passed on the Radxa Cubie A7Z: added an architecturally faithful
+  tiny fixed-shape decoder LM probe for the real small-model operator set.
+  - Verified generator: `scripts/host/make_tiny_faithful_block_onnx.py`.
+  - Verified model shape: `1x16` int32 token IDs to `1x16x256` logits,
+    `dim=64`, `2` layers, `4` attention heads, `2` KV heads, `W=16`.
+  - Verified ONNX ops include RMSNorm components (`ReduceMean`, `Sqrt`,
+    `Reciprocal`), RoPE (`Slice`, `Neg`, `Concat`), GQA repeat (`Reshape`,
+    `Tile`), batched attention `MatMul`/`Softmax`, SwiGLU `Sigmoid`/`Mul`,
+    token `Gather`, and logits `MatMul`.
+  - Verified ACUITY int16 export completed for target
+    `VIP9000NANODI_PLUS_PID0X1000003B`; final export ended with
+    `Error(0),Warning(0)`.
+  - Verified NBG package path:
+    `work/model-packages/tiny_faithful_block/int16/`; `network_binary.nb`
+    size `409,136` bytes.
+  - Verified board path:
+    `/home/radxa/a733_npu_driver/models/tiny_faithful_block_t2_int16`.
+  - Verified board run logged VIPLite `2.0.3.2-AW-2024-08-30`,
+    `cid=0x1000003b`, output `dfp=13`, and `vpm run ret=0`.
+  - Verified board profile inference times for three loops:
+    `186us`, `251us`, `245us`.
+  - Verified `compare_outputs.py` result vs board `output_0.txt`: length
+    `4096`, max abs diff `0.073730469`, mean abs diff `0.003069133`, RMSE
+    `0.006297570`, cosine `0.999967503`.
+  - Verified no model-op fallback or unsupported-op blocker appeared in the
+    host or board logs.
+- Report added: `reports/t2-faithful-block.md`.
+
 ## Next Gate
 
-Phase 3a / NPU-only LLM/VLM path:
-
-1. Extend the persistent fixed-window loop pattern to the VLM bridge path,
-   keeping all model-layer stages on NPU.
+Await the next explicit task prompt. Do not start a new gate without a pasted
+task.
