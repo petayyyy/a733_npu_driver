@@ -13,3 +13,5 @@ docker_images*/
 *.zip
 __pycache__/
 *.py[cod]
+_tree.txt
+_upload_bundle/
