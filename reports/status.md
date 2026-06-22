@@ -430,6 +430,26 @@
     - Generated diagnostic layer6 tokens: `0 52643 120889 100091`
       (`!ascus棰主义`). This narrows the board runtime threshold: 6 Qwen
       decoder layers run, 8 layers export but are killed on this 1GiB runtime.
+  - Verified Qwen W=32 seven-layer `pcq` diagnostic export and NPU run:
+    - ONNX: `work/generated/qwen25_05b_w32_layer7/real_llm.onnx`, size
+      `962,152,249` bytes.
+    - ACUITY import, quantize, inference, and export completed; final export
+      `Error(0),Warning(0)`.
+    - `work/model-packages/qwen25_05b_w32_layer7/pcq/network_binary.nb`, size
+      `357,150,496` bytes.
+    - Board path:
+      `/home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer7_pcq`.
+    - Runtime: VIPLite `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`,
+      int32 input `1x32`, int8 asymmetric output `1x1x151936`,
+      `memory_pool_bytes=214016`, `nbg_loaded_once=1`, `status=0`.
+    - Timing: create network `2,160.034ms`, prepare `5.678ms`,
+      first-step wall `47.579ms`, first-step NPU profile `33.555ms`,
+      mean wall `48.361ms/token`, mean NPU profile `33.592ms/token`,
+      `20.678 tok/s`, peak RSS `350,496 KB`.
+    - Generated diagnostic layer7 tokens: `0 52643 120889 100091`
+      (`!ascus棰主义`). Bisection result: 7 Qwen decoder layers run as `pcq`;
+      8 layers export on host but are killed before VIPLite metadata on this
+      1GiB board/runtime path.
 - Task T5 SmolLM2 int8-quality continuation:
   - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
     reached `End quantization...` / `Dump net quantize tensor table` and then
@@ -458,10 +478,10 @@
 
 T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
 1GiB Radxa board; full Qwen `pcq` is the viable memory target but is currently
-blocked in ACUITY quantize-table serialization/rebuild. Next step is to unblock
-or bisect the full Qwen `pcq` conversion between six and eight layers; one-,
-four-, and six-layer Qwen `pcq` NBGs are passing hardware diagnostic controls,
-while eight layers exports on host but is too large for this board runtime.
+blocked in ACUITY quantize-table serialization/rebuild. Hardware bisection on
+this board found the current runnable partial ceiling at 7 Qwen decoder layers
+(`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS `350,496 KB`); 8
+layers exports on host but is too large for this board runtime.
 
 T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
 upload and compare the first six generated tokens against the FP/int16 oracle

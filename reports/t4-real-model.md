@@ -740,6 +740,62 @@ decoded: !ascus棰主义
 This narrows the board runtime threshold for this Qwen `pcq` partial graph:
 six decoder layers run, while eight layers are killed before network metadata.
 
+Verified Qwen W=32 seven-layer `pcq` diagnostic export and board run:
+
+```text
+work/generated/qwen25_05b_w32_layer7/real_llm.onnx  962,152,249 bytes
+logs/host/t4-qwen25-05b-w32-layer7-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-layer7-pcq-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+inference: completed
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 357,150,496 bytes
+output: int8 asymmetric affine, shape 1x1x151936
+ACUITY export simulator: create network 2.147s, verify 24.159s, one run 8.972s
+```
+
+Uploaded and ran the Qwen W=32 seven-layer `pcq` diagnostic package on the A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer7_pcq
+logs/board/qwen25_05b_w32_layer7_pcq_smoke-run.log
+logs/board/qwen25_05b_w32_layer7_pcq_smoke-rss.env
+network_binary.nb: 357,150,496 bytes
+VIPLite: 2.0.3.2-AW-2024-08-30
+cid: 0x1000003b
+input: int32 1x32
+output: int8 asymmetric affine 1x1x151936
+memory_pool_bytes: 214,016
+nbg_loaded_once: 1
+status: 0
+```
+
+Verified Qwen layer7 `pcq` persistent-runner timing:
+
+```text
+create_network_us=2160034
+prepare_network_us=5678
+first_step_wall_us=47579
+first_step_profile_us=33555
+mean_wall_us=48361.000
+mean_profile_us=33592.250
+mean_tok_s=20.678
+peak_rss_kb=350496
+```
+
+Generated layer7 diagnostic tokens:
+
+```text
+0 52643 120889 100091
+decoded: !ascus棰主义
+```
+
+Layer bisection result for this board/runtime path: seven Qwen decoder layers
+run as `pcq`; eight layers are killed before network metadata. The current
+maximum runnable Qwen partial graph is therefore `W=32`, `pcq`, 7 layers,
+`network_binary.nb=357,150,496` bytes, peak RSS `350,496 KB`.
+
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
@@ -750,14 +806,16 @@ Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
 `pcq` quantization stalls after `End quantization`, but a one-layer Qwen `pcq`
 diagnostic export passes and the full 24-layer `int16` control export passes.
 On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while
-one-layer, four-layer, and six-layer Qwen `pcq` diagnostic NBGs run
-successfully on the NPU. Eight-layer Qwen `pcq` exports on host but is killed
-on the board before network creation completes.
+one-layer, four-layer, six-layer, and seven-layer Qwen `pcq` diagnostic NBGs
+run successfully on the NPU. Eight-layer Qwen `pcq` exports on host but is
+killed on the board before network creation completes.
 
 ## Next
 
 For a full Qwen board run on this 1GiB Radxa, the viable path is a full `pcq`
 or smaller-than-int16 package. The current blocker is ACUITY full-Qwen `pcq`
 quantize-table serialization/rebuild. If that cannot be cleared, continue with
-layer-count bisection between four and eight layers or a smaller model/graph;
-full Qwen `int16` is too large for the board RAM.
+clearing the 24-layer ACUITY `pcq` quantize-table stall plus reducing the full
+NBG under the board's runtime memory ceiling. For this 1GiB board, the observed
+partial-graph ceiling is 7 Qwen decoder layers at W=32 `pcq`; full Qwen
+`int16` is too large for board RAM.
