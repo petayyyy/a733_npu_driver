@@ -295,10 +295,33 @@
   - `scripts/host/smollm2_numpy_reference.py`
   - `scripts/host/make_smollm2_calibration.py`
   - `scripts/board/run-npu-lm-runner-rss.sh`
+- Task T5 started: investigated ACUITY hybrid/weight-only style `pcq` as the
+  first int8 quality-fix attempt for SmolLM2-135M W=32.
+  - Verified `pegasus quantize --help` in `ubuntu-npu:v2.0.10.1` exposes
+    `--hybrid`.
+  - Updated `scripts/host/convert_onnx_to_nbg.sh` with a `--hybrid` flag.
+  - Verified direct hybrid quantize without an existing `.quantize` table fails
+    before inference/export with:
+    `quantize file 'smollm2_135m_w32_hybrid_pcq_pcq.quantize' does not exist`.
+    Logs:
+    `logs/host/t5-smollm2-w32-hybrid-pcq-convert.log` and
+    `logs/host/t5-smollm2-w32-hybrid-pcq-convert.err.log`.
+  - Updated the hybrid flow to seed the normal `pcq` quantize table first, then
+    run `pegasus_quantize_hybird.sh`.
+  - Verified seeded run imported the SmolLM2 W=32 graph and reached
+    `End quantization...` / `Dump net quantize tensor table`, but the quantize
+    table remained `0` bytes while the T5 Docker container was still CPU-active.
+  - Stopped only the T5 Docker container to avoid interfering with the
+    separately running Qwen2.5-0.5B conversion container from another chat.
+    Verified Qwen container remained running.
+  - No T5 hybrid NBG package or board run yet; this is paused due to parallel
+    Qwen work, not a hybrid quality result.
+- Report added: `reports/t5-quant.md`.
 
 ## Next Gate
 
-T4 branch point: SmolLM2 passes the NPU-only coherent-text gate with int16 at
-`W=64`; the requested `pcq` int8 path has a precise quality blocker. If int8 is
-mandatory, proceed to T6 with the SmolLM2 `pcq` quality blocker before
-attempting Qwen2.5-0.5B as an int8 deliverable.
+T5 resume point: after the parallel Qwen2.5-0.5B Docker/board task is done or
+stopped, rerun the seeded SmolLM2 W=32 hybrid `pcq` conversion and continue the
+T5 attempt order. If the seed quantize-table dump is still stuck when run
+alone, seed the hybrid pass from the already verified
+`smollm2_135m_w32_calib_pcq.quantize` table before moving to mixed precision.

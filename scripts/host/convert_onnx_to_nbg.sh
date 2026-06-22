@@ -19,6 +19,7 @@ Optional:
   --image IMAGE        Docker image, default: ubuntu-npu:v2.0.10.1
   --target TARGET      ACUITY target id, default: VIP9000NANODI_PLUS_PID0X1000003B
   --package-root DIR   Output package root, default: work/model-packages
+  --hybrid             Use ACUITY hybrid quantization for the quantize step
 EOF
 }
 
@@ -94,6 +95,7 @@ PACKAGE_ROOT=work/model-packages
 AI_SDK_MODELS=work/ai-sdk/ZIFENG278-ai-sdk/models
 ACUITY_PATH=/root/acuity-toolkit-whl-6.30.22/bin
 VIV_SDK=/root/Vivante_IDE/VivanteIDE5.11.0/cmdtools
+HYBRID=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -107,6 +109,7 @@ while [ "$#" -gt 0 ]; do
         --image) IMAGE=${2:-}; shift 2 ;;
         --target) TARGET=${2:-}; shift 2 ;;
         --package-root) PACKAGE_ROOT=${2:-}; shift 2 ;;
+        --hybrid) HYBRID=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
@@ -187,7 +190,12 @@ if items and all(item.lower().endswith(".npy") for item in items):
     inputmeta.write_text(text, encoding="ascii")
     print(f"patched tensor inputmeta for {name}: {inputmeta}")
 PY
-bash pegasus_quantize.sh "$NAME" "$QUANT"
+if [ "$HYBRID" = "1" ]; then
+    bash pegasus_quantize.sh "$NAME" "$QUANT"
+    bash pegasus_quantize_hybird.sh "$NAME" "$QUANT"
+else
+    bash pegasus_quantize.sh "$NAME" "$QUANT"
+fi
 bash pegasus_inference.sh "$NAME" "$QUANT"
 bash pegasus_export_ovx_nbg.sh "$NAME" "$QUANT" "$TARGET" "$VIV_SDK"
 EOF
