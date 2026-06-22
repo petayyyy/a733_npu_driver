@@ -653,6 +653,39 @@ This is still a partial-model diagnostic, not a coherence result. It narrows
 the Qwen `pcq` blocker: 4 real decoder layers export and run; 24 layers stall
 inside ACUITY quantize-table serialization/rebuild.
 
+Verified Qwen W=32 eight-layer `pcq` diagnostic export:
+
+```text
+work/generated/qwen25_05b_w32_layer8/real_llm.onnx  1,021,807,653 bytes
+logs/host/t4-qwen25-05b-w32-layer8-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-layer8-pcq-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+inference: completed
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 370,698,816 bytes
+output: int8 asymmetric affine, shape 1x1x151936
+ACUITY export simulator: create network 2.338s, verify 25.962s, one run 9.980s
+```
+
+Uploaded and attempted the Qwen W=32 eight-layer `pcq` diagnostic package on the
+A733:
+
+```text
+board path: /home/radxa/a733_npu_driver/models/qwen25_05b_w32_layer8_pcq
+logs/board/qwen25_05b_w32_layer8_pcq_smoke-run.log
+logs/board/qwen25_05b_w32_layer8_pcq_smoke-rss.env
+network_binary.nb: 370,698,816 bytes
+runner status: 137
+peak_rss_kb: 363,728
+run.log: empty
+board memory after kill: 959Mi total, 649Mi available, 2.3Gi swap available
+```
+
+Interpretation: eight Qwen decoder layers export successfully as `pcq`, but the
+370.7MB NBG is already too large for this 1GiB board/runtime path; the process
+is killed before VIPLite metadata is printed.
+
 ## Result
 
 Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
@@ -664,12 +697,13 @@ Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
 diagnostic export passes and the full 24-layer `int16` control export passes.
 On the A733 board, the full Qwen W=32 `int16` NBG is blocked by RAM, while
 one-layer and four-layer Qwen `pcq` diagnostic NBGs run successfully on the
-NPU.
+NPU. Eight-layer Qwen `pcq` exports on host but is killed on the board before
+network creation completes.
 
 ## Next
 
 For a full Qwen board run on this 1GiB Radxa, the viable path is a full `pcq`
 or smaller-than-int16 package. The current blocker is ACUITY full-Qwen `pcq`
 quantize-table serialization/rebuild. If that cannot be cleared, continue with
-layer-count bisection above four layers or a smaller model/graph; full Qwen
-`int16` is too large for the board RAM.
+layer-count bisection between four and eight layers or a smaller model/graph;
+full Qwen `int16` is too large for the board RAM.
