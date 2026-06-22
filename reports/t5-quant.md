@@ -141,17 +141,7 @@ Verified spot check: the generated seed sets logits/head/embedding entries to
 entries such as `reshape_2281` and `fullconnect_2282` remain
 `qtype: i8` / `asymmetric_affine`.
 
-## Current Result
-
-Verified: no new T5 NBG package has been produced yet, and no new board run has
-been attempted for T5 after the hybrid blocker. A Qwen conversion container
-from the parallel chat is currently active, so no heavy T5 Docker conversion was
-started after preparing the mixed seed.
-
-## Next
-
-Verified next action after the Qwen task is done or stopped: run attempt 2
-using the mixed seed without rebuilding the quantize table:
+Verified mixed export command:
 
 ```bash
 scripts/host/convert_onnx_to_nbg.sh \
@@ -165,6 +155,85 @@ scripts/host/convert_onnx_to_nbg.sh \
   --seed-quantize work/generated/smollm2_135m_w32_mixed_pcq/smollm2_135m_w32_mixed_pcq_pcq.quantize
 ```
 
-If export succeeds, upload the package to the board and compare the first six
-generated tokens for `The capital of France is` against the existing FP/int16
-oracle sequence `504 3575 282 4649 314 7042`.
+Verified host result:
+
+```text
+logs/host/t5-smollm2-w32-mixed-pcq-seeded-convert.log
+logs/host/t5-smollm2-w32-mixed-pcq-seeded-convert.err.log
+ACUITY import: SUCCESS
+ACUITY inference: completed
+ACUITY export: Error(0),Warning(0)
+work/model-packages/smollm2_135m_w32_mixed_pcq/pcq/network_binary.nb
+size: 205,233,968 bytes
+output: int16 dynamic_fixed_point, fl=10, shape 1x1x49152
+```
+
+Verified board upload:
+
+```text
+/home/radxa/a733_npu_driver/models/smollm2_135m_w32_mixed_pcq/network_binary.nb
+size: 205,233,968 bytes
+```
+
+Verified raw-window board run for calibration sample `The capital of France is`
+(`token_ids_raw_00.npy`, 27 pad tokens then `504 3575 282 4649 314`):
+
+```text
+status=0
+nbg_loaded_once=1
+create_network_us=136168
+prepare_network_us=6688
+mean_wall_us=33872.500
+mean_profile_us=28602.833
+mean_tok_s=29.522
+peak_rss_kb=204372
+generated tokens: 260 260 260 357 260 2581
+```
+
+Verified chat-wrapper board run for `What is the capital of France?`:
+
+```text
+status=0
+nbg_loaded_once=1
+create_network_us=584165
+prepare_network_us=11474
+mean_wall_us=37288.688
+mean_profile_us=28646.188
+mean_tok_s=26.818
+generated_ids:
+260 260 260 260 216 260 36335 3427 216 260 36335 3427 216 216 260 33
+decoded:
+the the the the  the Kaw strugg  the Kaw strugg   the1
+```
+
+Conclusion for attempt 2: mixed PCQ executes mechanically on the NPU and meets
+the size/RSS improvement requirement versus W=32 int16, but it does not recover
+coherence. The first generated tokens do not match the FP/int16 oracle sequence
+`504 3575 282 4649 314 7042`.
+
+## Current Result
+
+Verified: attempt 1 hybrid/w8a16 is blocked in ACUITY quantize-table emission.
+Attempt 2 mixed PCQ exports and runs on the NPU, but fails the coherence gate.
+
+## Next
+
+Verified next action: attempt 3, combining the mixed seed with ACUITY hybrid
+quantization:
+
+```bash
+scripts/host/convert_onnx_to_nbg.sh \
+  --name smollm2_135m_w32_mixed_hybrid_pcq \
+  --onnx work/generated/smollm2_135m_w32/real_llm.onnx \
+  --dataset work/generated/smollm2_135m_w32_calib/dataset.txt \
+  --quant pcq \
+  --inputs token_ids \
+  --input-size-list 32 \
+  --outputs logits \
+  --hybrid \
+  --hybrid-seed-quantize work/generated/smollm2_135m_w32_mixed_pcq/smollm2_135m_w32_mixed_pcq_pcq.quantize
+```
+
+Risk: previous hybrid runs reached graph transformation but became stuck while
+dumping the rewritten YAML quantize table. If attempt 3 repeats that blocker,
+collect the logs and escalate T6/vendor with the preserved hybrid artifacts.

@@ -495,8 +495,21 @@
     (9,209,753 bytes): PCQ remains for transformer linear/MLP regions, while
     token embedding, final RMSNorm, lm_head/logits, and final output path use
     int16 entries copied from the known-coherent int16 table.
-  - Did not start the mixed export yet because a Qwen Docker container from the
-    parallel chat is active; this avoids interfering with that task.
+  - Verified mixed PCQ export with `--seed-quantize`:
+    `work/model-packages/smollm2_135m_w32_mixed_pcq/pcq/network_binary.nb`,
+    size `205,233,968` bytes, output `1x1x49152` int16 dynamic fixed point
+    with `fl=10`, final export `Error(0),Warning(0)`.
+  - Uploaded mixed PCQ package to
+    `/home/radxa/a733_npu_driver/models/smollm2_135m_w32_mixed_pcq`.
+  - Verified mixed PCQ raw-window NPU run for `The capital of France is`
+    executes mechanically: `status=0`, `nbg_loaded_once=1`,
+    `create_network_us=136168`, `prepare_network_us=6688`,
+    `mean_wall_us=33872.500`, `mean_profile_us=28602.833`,
+    `mean_tok_s=29.522`, `peak_rss_kb=204372`.
+  - Mixed PCQ quality failed: raw-window generated tokens were
+    `260 260 260 357 260 2581`; chat-wrapper generated text started
+    `the the the the  the Kaw...`, not the FP/int16 oracle
+    `504 3575 282 4649 314 7042` / `The capital of France is Paris`.
 
 ## Next Gate
 
@@ -509,6 +522,6 @@ Hardware bisection on this board found the current runnable partial ceiling at
 7 Qwen decoder layers (`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS
 `350,496 KB`); 8 layers exports on host but is too large for this board runtime.
 
-T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
-upload and compare the first six generated tokens against the FP/int16 oracle
-`504 3575 282 4649 314 7042`.
+T5 resume point: attempt 3 by combining the mixed seed with ACUITY hybrid
+quantization. If it repeats the prior hybrid quantize-table dump blocker,
+preserve logs/artifacts and escalate T6/vendor.
