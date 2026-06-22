@@ -198,7 +198,29 @@
     NBG size dropped from `409,136` bytes to `285,440` bytes.
 - Report added: `reports/t3-slice-int8.md`.
 
+- Task T4 started: added the real-model fixed-window ONNX generator and built
+  the first full-depth SmolLM2-135M-Instruct graph at `W=32`.
+  - Added `scripts/host/make_real_llm_onnx.py`.
+  - Verified HF source files under
+    `work/models/smollm2-135m-instruct/`: `config.json`,
+    `model.safetensors`, `tokenizer.json`, `tokenizer_config.json`, and
+    `generation_config.json`.
+  - Verified SmolLM2 config: `30` layers, `hidden_size=576`,
+    `intermediate_size=1536`, `9` attention heads, `3` KV heads,
+    `head_dim=64`, `vocab_size=49152`, `rope_theta=100000`, tied
+    embeddings/logits.
+  - Verified generated ONNX:
+    `work/generated/smollm2_135m_w32/real_llm.onnx`, size
+    `651,500,555` bytes.
+  - Verified graph output is sliced last-token logits with shape
+    `1x1x49152`.
+  - Next: convert the W=32 graph with ACUITY `pcq`; if conversion rejects the
+    graph or hits a size/resource limit, save the full log and record the exact
+    blocker for T6.
+- Report started: `reports/t4-real-model.md`.
+
 ## Next Gate
 
-Await the next explicit task prompt. Do not start a new gate without a pasted
-task.
+Continue T4: run SmolLM2-135M-Instruct W=32 ACUITY `pcq` conversion, then board
+validation with the persistent runner if conversion succeeds. Do not start T5
+or T6 unless T4 reaches its success gate or a precise blocker.
