@@ -188,9 +188,21 @@ logits:
   stayed in the NBG graph.
 
 This proves the static NPU language graph can be driven as an autoregressive
-loop under the active NPU-only constraint. The next G3a gate is replacing the
-per-token `vpm_run` process launch with a persistent VIPLite/awnn runner, then
-extending the same loop pattern to the VLM path.
+loop under the active NPU-only constraint.
+
+The T1 persistent-runner gate also passed on 2026-06-22. A C VIPLite runner now
+loads and prepares the tiny LM NBG once, then submits 8 token windows without
+destroying or recreating the network:
+
+- Generated sequence matched the old reload loop:
+  `1 5 9 2 1 8 4 5 8 4 8 4`.
+- Persistent runner mean wall time: `146.375us/token`.
+- Persistent runner mean NPU profile time: `61.375us/token`.
+- Old `vpm_run` reload component sum for create+prepare+read+run:
+  `1,019.875us/token`.
+
+The next G3a gate is extending the same persistent loop pattern to the VLM
+bridge path.
 
 Historical CPU baseline: llama.cpp built on the Radxa board at
 commit `f449e0553708b895adbd94a301431cef691f632d`; the separate

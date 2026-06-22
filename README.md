@@ -25,12 +25,15 @@ orchestration, validation, and other non-inference support work.
   `Gather`, image/text concat, decoder compute, and `1x5x16` logits in one NBG.
   A fixed-window tiny LM decode loop has also been validated: CPU updates the
   `1x4` token window and postprocesses logits, while every LM forward pass runs
-  as an NBG on the NPU.
+  as an NBG on the NPU. The per-token `vpm_run` relaunch path has now been
+  replaced for the tiny LM by a persistent VIPLite C runner that loads the NBG
+  once and reproduces the same generated token sequence with lower stable
+  per-token wall time.
   The previous CPU llama.cpp decoder result is retained only as a diagnostic
   baseline and is not a project deliverable.
 
-The next milestone is replacing per-token `vpm_run` launches with a persistent
-VIPLite/awnn runner, then extending the same loop pattern to the VLM path.
+The next milestone is extending the persistent fixed-window loop pattern to the
+VLM bridge path.
 
 ## Repository Layout
 
@@ -43,8 +46,11 @@ scripts/
   board/
     a733-g0-g1-smoke.sh    Board diagnostics and NPU smoke-test collector
     build-ai-sdk.sh        Build helper for an already cloned ai-sdk tree
+    build-npu-lm-runner.sh Build the persistent tiny LM VIPLite runner
+    npu_lm_runner.c        Persistent tiny LM VIPLite runner source
     build-llama-cpp.sh     Historical CPU baseline helper, not a deliverable
     run-llama-decode.sh    Historical CPU baseline helper, not a deliverable
+    run-npu-lm-runner.sh   Logged persistent tiny LM runner wrapper
     run-tiny-lm-decode-loop.sh NPU-only tiny LM fixed-window decode loop
     run-vpm.sh             Logged wrapper around vpm_run
   host/
@@ -65,6 +71,7 @@ reports/
   g3a-tiny-lm-decode-loop-npu.md Tiny LM NPU fixed-window decode loop
   g3a-tiny-lm-gather-npu.md Tiny token-id LM NPU validation
   g3a-tiny-vlm-bridge-npu.md Tiny VLM bridge NPU validation
+  t1-persistent-runner.md  Persistent tiny LM VIPLite runner validation
   g3a-llama-cpp-decoder.md Historical CPU baseline, not a deliverable
 ```
 

@@ -94,11 +94,33 @@
   - Per-step NPU profile: min `68us`, max `138us`, mean `93.375us`.
   - Every step logged `cid=0x1000003b` and `vpm run ret=0`.
 
+## 2026-06-22
+
+- Task T1 passed on the Radxa Cubie A7Z: added a persistent VIPLite C runner
+  for the existing tiny LM NBG.
+  - Source/build/run helpers:
+    `scripts/board/npu_lm_runner.c`,
+    `scripts/board/build-npu-lm-runner.sh`,
+    `scripts/board/run-npu-lm-runner.sh`.
+  - Verified on board with VIPLite `2.0.3.2-AW-2024-08-30` and
+    `cid=0x1000003b`.
+  - Verified the NBG is loaded/prepared once:
+    `create_network_us=457`, `prepare_network_us=218`, `nbg_loaded_once=1`.
+  - Verified generated sequence matches the prior reload loop:
+    `1 5 9 2 1 8 4 5 8 4 8 4`.
+  - Verified persistent mean per-token wall time: `146.375us`; mean NPU
+    profile time: `61.375us`; mean runner throughput: `6831.768 tok/s`.
+  - Verified old reload-loop baseline on the same board/model/prompt:
+    same token sequence, mean `vpm_run` create+prepare+read+run component sum
+    `1,019.875us/token`, external shell-loop wall `1,236,942.860us/token`.
+  - Result: persistent runner is about `6.97x` faster than the old
+    SDK-visible per-token reload component sum, and much faster than the full
+    shell loop that also included process launch, Python/file I/O, and logging.
+- Report added: `reports/t1-persistent-runner.md`.
+
 ## Next Gate
 
 Phase 3a / NPU-only LLM/VLM path:
 
-1. Replace per-token `vpm_run` launches with a persistent VIPLite/awnn runner
-   that loads the tiny LM NBG once and submits repeated token windows.
-2. Extend the same fixed-window loop pattern to the VLM bridge path, keeping
-   all model-layer stages on NPU.
+1. Extend the persistent fixed-window loop pattern to the VLM bridge path,
+   keeping all model-layer stages on NPU.
