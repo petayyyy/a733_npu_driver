@@ -377,6 +377,29 @@
       (`forgettableforgettableforgettable im`). This is a Qwen-shaped NPU
       execution control, not a coherence pass, because it has only one decoder
       layer.
+- Task T5 SmolLM2 int8-quality continuation:
+  - Verified seeded ACUITY hybrid/w8a16 rerun, without Qwen contention, again
+    reached `End quantization...` / `Dump net quantize tensor table` and then
+    left `smollm2_135m_w32_hybrid_pcq_pcq.quantize` at `0` bytes while ACUITY
+    stayed CPU-active.
+  - Verified fallback `--hybrid-seed-quantize` using the existing calibrated
+    PCQ table. ACUITY consumed the seed and emitted
+    `smollm2_135m_w32_hybrid_pcq_pcq.quantize.json` with 589
+    `dtype_converter` ops, but again truncated the YAML `.quantize` table to
+    `0` bytes and produced no NBG package.
+  - Hybrid/w8a16 attempt is blocked in ACUITY quantize-table emission; logs are
+    preserved under `logs/host/t5-smollm2-w32-hybrid-*.log`.
+  - Added `--seed-quantize` to `scripts/host/convert_onnx_to_nbg.sh` so an
+    existing quantize table can be used for ACUITY inference/export without
+    rerunning quantization.
+  - Added `scripts/host/make_smollm2_mixed_quantize.py` and generated mixed
+    seed table
+    `work/generated/smollm2_135m_w32_mixed_pcq/smollm2_135m_w32_mixed_pcq_pcq.quantize`
+    (9,209,753 bytes): PCQ remains for transformer linear/MLP regions, while
+    token embedding, final RMSNorm, lm_head/logits, and final output path use
+    int16 entries copied from the known-coherent int16 table.
+  - Did not start the mixed export yet because a Qwen Docker container from the
+    parallel chat is active; this avoids interfering with that task.
 
 ## Next Gate
 
@@ -385,3 +408,7 @@ T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
 blocked in ACUITY quantize-table serialization/rebuild. Next step is to unblock
 or bisect the full Qwen `pcq` conversion; the one-layer Qwen `pcq` NBG is the
 passing hardware diagnostic control.
+
+T5 resume point: run SmolLM2 W=32 mixed PCQ export with `--seed-quantize`, then
+upload and compare the first six generated tokens against the FP/int16 oracle
+`504 3575 282 4649 314 7042`.

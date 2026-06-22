@@ -20,6 +20,10 @@ Optional:
   --target TARGET      ACUITY target id, default: VIP9000NANODI_PLUS_PID0X1000003B
   --package-root DIR   Output package root, default: work/model-packages
   --hybrid             Use ACUITY hybrid quantization for the quantize step
+  --seed-quantize PATH
+                       Existing .quantize file; skip quantize and export only
+  --hybrid-seed-quantize PATH
+                       Existing .quantize file to seed --hybrid and skip rebuild
 EOF
 }
 
@@ -96,6 +100,8 @@ AI_SDK_MODELS=work/ai-sdk/ZIFENG278-ai-sdk/models
 ACUITY_PATH=/root/acuity-toolkit-whl-6.30.22/bin
 VIV_SDK=/root/Vivante_IDE/VivanteIDE5.11.0/cmdtools
 HYBRID=0
+SEED_QUANTIZE=
+HYBRID_SEED_QUANTIZE=
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -110,6 +116,8 @@ while [ "$#" -gt 0 ]; do
         --target) TARGET=${2:-}; shift 2 ;;
         --package-root) PACKAGE_ROOT=${2:-}; shift 2 ;;
         --hybrid) HYBRID=1; shift ;;
+        --seed-quantize) SEED_QUANTIZE=${2:-}; shift 2 ;;
+        --hybrid-seed-quantize) HYBRID_SEED_QUANTIZE=${2:-}; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
@@ -139,6 +147,25 @@ ONNX_ABS=$(abs_existing "$ONNX") || die "ONNX path not found: $ONNX"
 DATASET_ABS=$(abs_existing "$DATASET") || die "dataset path not found: $DATASET"
 [ -f "$ONNX_ABS" ] || die "ONNX path is not a file: $ONNX_ABS"
 [ -f "$DATASET_ABS" ] || die "dataset path is not a file: $DATASET_ABS"
+if [ -n "$HYBRID_SEED_QUANTIZE" ] && [ "$HYBRID" != "1" ]; then
+    die "--hybrid-seed-quantize requires --hybrid"
+fi
+if [ -n "$SEED_QUANTIZE" ] && [ "$HYBRID" = "1" ]; then
+    die "--seed-quantize skips all quantize passes; use --hybrid-seed-quantize for --hybrid"
+fi
+if [ -n "$SEED_QUANTIZE" ] && [ -n "$HYBRID_SEED_QUANTIZE" ]; then
+    die "--seed-quantize and --hybrid-seed-quantize are mutually exclusive"
+fi
+SEED_QUANTIZE_ABS=
+if [ -n "$SEED_QUANTIZE" ]; then
+    SEED_QUANTIZE_ABS=$(abs_existing "$SEED_QUANTIZE") || die "seed quantize path not found: $SEED_QUANTIZE"
+    [ -f "$SEED_QUANTIZE_ABS" ] || die "seed quantize path is not a file: $SEED_QUANTIZE_ABS"
+fi
+HYBRID_SEED_QUANTIZE_ABS=
+if [ -n "$HYBRID_SEED_QUANTIZE" ]; then
+    HYBRID_SEED_QUANTIZE_ABS=$(abs_existing "$HYBRID_SEED_QUANTIZE") || die "seed quantize path not found: $HYBRID_SEED_QUANTIZE"
+    [ -f "$HYBRID_SEED_QUANTIZE_ABS" ] || die "seed quantize path is not a file: $HYBRID_SEED_QUANTIZE_ABS"
+fi
 
 cd "$REPO_ROOT"
 MODEL_DIR="$AI_SDK_MODELS/$NAME"
@@ -151,6 +178,12 @@ cp "$DATASET_ABS" "$MODEL_DIR/dataset.txt"
 copy_dataset_payloads "$DATASET_ABS" "$MODEL_DIR"
 if [ -f "$(dirname -- "$DATASET_ABS")/tokens.txt" ]; then
     cp "$(dirname -- "$DATASET_ABS")/tokens.txt" "$MODEL_DIR/tokens.txt"
+fi
+if [ -n "$SEED_QUANTIZE_ABS" ]; then
+    cp "$SEED_QUANTIZE_ABS" "$MODEL_DIR/${NAME}_${QUANT}.quantize"
+fi
+if [ -n "$HYBRID_SEED_QUANTIZE_ABS" ]; then
+    cp "$HYBRID_SEED_QUANTIZE_ABS" "$MODEL_DIR/${NAME}_${QUANT}.quantize"
 fi
 printf -- "--inputs %s --input-size-list %s --outputs %s\n" \
     "$(quote_for_inputs_outputs "$INPUTS")" \
@@ -191,8 +224,12 @@ if items and all(item.lower().endswith(".npy") for item in items):
     print(f"patched tensor inputmeta for {name}: {inputmeta}")
 PY
 if [ "$HYBRID" = "1" ]; then
-    bash pegasus_quantize.sh "$NAME" "$QUANT"
+    if [ -z "$HYBRID_SEED_QUANTIZE" ]; then
+        bash pegasus_quantize.sh "$NAME" "$QUANT"
+    fi
     bash pegasus_quantize_hybird.sh "$NAME" "$QUANT"
+elif [ -n "$SEED_QUANTIZE" ]; then
+    echo "using seeded quantize table: $NAME/${NAME}_${QUANT}.quantize"
 else
     bash pegasus_quantize.sh "$NAME" "$QUANT"
 fi
