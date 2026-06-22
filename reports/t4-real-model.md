@@ -462,25 +462,67 @@ logs/host/t4-qwen25-05b-w32-pcq-convert.err.log
 container=tender_buck
 ```
 
-Current observed state:
+Full `pcq` observed state before stopping the container:
 
 ```text
 ONNX import: SUCCESS
 qwen25_05b_w32.data: 2,521,343,935 bytes
 entropy.txt: 67,137 bytes
 last log line: End quantization / Dump net quantize tensor table
-container status: still running
+container status: still running before manual stop
 active process: python3 pegasus.py quantize
-elapsed in quantize: about 50 minutes at observation time
+elapsed in quantize: over 80 minutes at final observation time
 CPU: about 100%
 RSS: about 5.0 GiB
 qwen25_05b_w32_pcq.quantize: 0 bytes at observation time
+IO counters: unchanged across repeated samples
 ```
 
-Interpretation: the Qwen `pcq` path had not crashed at observation time. It was
-still inside ACUITY quantize after printing `End quantization`, likely in a
-large in-memory rebuild or final serialization stage. No Qwen NBG had been
-exported yet at this checkpoint.
+Interpretation: the full Qwen `pcq` path did not crash, but it stalled inside
+ACUITY quantize after printing `End quantization`. The container `tender_buck`
+was stopped after repeated zero-IO checks. No full Qwen `pcq` NBG was exported.
+
+Verified Qwen-shaped diagnostic `pcq` export with one real decoder layer:
+
+```text
+logs/host/t4-qwen25-05b-w32-layer1-pcq-convert.log
+logs/host/t4-qwen25-05b-w32-layer1-pcq-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 274,904,704 bytes
+output: int8 asymmetric affine, shape 1x1x151936
+ACUITY export simulator: create network 1.894s, verify 15.907s, one run 4.547s
+```
+
+This confirms the Qwen graph pattern and large-vocabulary sliced-logits output
+are accepted by ACUITY on a smaller Qwen diagnostic graph; the full `pcq`
+blocker is scale-specific to the 24-layer graph.
+
+Verified full Qwen2.5-0.5B-Instruct W=32 `int16` control export:
+
+```text
+logs/host/t4-qwen25-05b-w32-int16-convert.log
+logs/host/t4-qwen25-05b-w32-int16-convert.err.log
+ONNX import: SUCCESS
+quantization: SUCCESS
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 1,064,540,800 bytes
+output: int16 dynamic fixed point, fl=11, shape 1x1x151936
+ACUITY export simulator: create network 14.018s, verify 64.928s, one run 49.430s
+```
+
+Board run is blocked at this checkpoint by host-to-board network access from
+the current environment:
+
+```text
+python/paramiko: WinError 10013
+ping 192.168.31.76: General failure
+ssh radxa@192.168.31.76: Permission denied while connecting to port 22
+```
+
+This is a connectivity/permission blocker from the current host environment,
+not a Qwen NBG export blocker and not a reason to request board power cycling.
 
 ## Result
 
@@ -488,14 +530,16 @@ Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
 `int16` at both `W=32` and `W=64`. Verified: the requested `pcq` int8 path
 converts and executes but fails coherence at `W=32`.
 
-Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation and ACUITY
-`pcq` quantization is in progress. The next gate is whether ACUITY completes
-the Qwen `pcq` package export, and if so whether the package runs coherently on
-the A733 NPU.
+Qwen2.5-0.5B-Instruct has now reached full W=32 ONNX generation. ACUITY full
+`pcq` quantization stalls after `End quantization`, but a one-layer Qwen `pcq`
+diagnostic export passes and the full 24-layer `int16` control export passes.
+The next gate is uploading the full Qwen W=32 `int16` NBG, or a later full
+`pcq` retry if ACUITY's quantize-table stall can be avoided, to the A733 NPU.
 
 ## Next
 
-Continue monitoring `tender_buck`. If it completes, package and upload the Qwen
-W=32 `pcq` NBG to the Radxa and run the persistent NPU LM runner. If it stalls
-or fails, record the exact ACUITY blocker and retry with the smallest useful
-variant, such as a layer-limited diagnostic graph or int16 control export.
+Restore host-to-board SSH/network access, then upload and run
+`work/model-packages/qwen25_05b_w32_int16/int16/` on the A733 through the
+persistent runner with `--seq-len 32 --vocab 151936`. For the requested int8
+path, retry full Qwen `pcq` only after addressing the ACUITY quantize-table
+stall; the one-layer Qwen `pcq` package is available as the diagnostic control.

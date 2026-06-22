@@ -337,15 +337,28 @@
   - Created Qwen W=32 calibration dataset with 12 token windows:
     `work/generated/qwen25_05b_w32_calib/dataset.txt`.
   - Started ACUITY `pcq` conversion in Docker container `tender_buck`; ONNX
-    import succeeded and quantization reached `End quantization`, but at the
-    last check the active `pegasus.py quantize` process was still running at
-    about 100% CPU and 5.0 GiB RSS with
-    `qwen25_05b_w32_pcq.quantize` still 0 bytes.
+    import succeeded and quantization reached `End quantization`, but the
+    active `pegasus.py quantize` process stayed at about 100% CPU and 5.0 GiB
+    RSS with unchanged IO counters and `qwen25_05b_w32_pcq.quantize` still
+    0 bytes. Stopped `tender_buck` as a stuck full-Qwen `pcq` conversion; no
+    full Qwen `pcq` NBG was exported.
+  - Verified Qwen-shaped W=32 one-layer `pcq` diagnostic export:
+    `work/model-packages/qwen25_05b_w32_layer1/pcq/network_binary.nb`, size
+    `274,904,704` bytes, final export `Error(0),Warning(0)`, output
+    `1x1x151936` int8 asymmetric affine.
+  - Verified full Qwen2.5-0.5B-Instruct W=32 `int16` control export:
+    `work/model-packages/qwen25_05b_w32_int16/int16/network_binary.nb`, size
+    `1,064,540,800` bytes, final export `Error(0),Warning(0)`, output
+    `1x1x151936` int16 dynamic fixed point with `fl=11`.
+  - Board upload/run is currently blocked by host-to-board network access from
+    this environment: Paramiko reports `WinError 10013`, `ping 192.168.31.76`
+    reports `General failure`, and OpenSSH reports `Permission denied` while
+    connecting to port 22.
 
 ## Next Gate
 
-T4 Qwen resume point: keep monitoring `tender_buck`. If Qwen `pcq` export
-completes, upload and run it on the A733 NPU through the persistent runner. If
-it stalls or fails, record the precise ACUITY blocker and run a smaller
-diagnostic or int16 control export before returning to the T5 hybrid `pcq`
-quality-fix branch.
+T4 Qwen resume point: restore host-to-board SSH/network access, then upload and
+run the full Qwen W=32 `int16` package on the A733 NPU through the persistent
+runner with `--seq-len 32 --vocab 151936`. The requested full Qwen `pcq` path is
+blocked in ACUITY quantize-table serialization/rebuild; the one-layer Qwen
+`pcq` package is the passing diagnostic control.
