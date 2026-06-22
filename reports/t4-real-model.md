@@ -302,7 +302,7 @@ Verified usable context window: `W=32` tokens. The current graph is fixed-window
 and recomputes the whole 32-token window for every decode step; no dynamic
 KV-cache is used.
 
-## Result
+## SmolLM2 W=32 Result
 
 Verified: SmolLM2-135M-Instruct runs as a real full-depth fixed-window NPU graph
 on the A733 through the persistent runner and produces coherent text with
@@ -313,11 +313,92 @@ updates, argmax, and logging.
 
 Verified: the requested `pcq` int8 path converts and executes, but fails the
 coherence check and is a precise quality blocker for an int8 T4 deliverable.
-Qwen2.5-0.5B is deferred until the SmolLM2 `pcq` blocker is accepted/escalated
-or the T4 target is explicitly treated as int16.
+
+## SmolLM2 W=64 Int16
+
+Verified: after W=32 passed on the int16 path, the same real SmolLM2 graph was
+rebuilt for `W=64`.
+
+Verified generated artifacts:
+
+```text
+work/generated/smollm2_135m_w64/real_llm.onnx      651,529,233 bytes
+work/generated/smollm2_135m_w64_calib/dataset.txt  12 calibration windows
+```
+
+Verified conversion result:
+
+```text
+logs/host/t4-smollm2-w64-int16-convert.log
+logs/host/t4-smollm2-w64-int16-convert.err.log
+ONNX import: SUCCESS
+quantization: Error(0),Warning(61)
+final NBG export: Error(0),Warning(0)
+network_binary.nb: 282,310,408 bytes
+output: int16 dynamic fixed point, fl=10, shape 1x1x49152
+ACUITY export simulator one run: 15859.64ms
+```
+
+Verified board path:
+
+```text
+/home/radxa/a733_npu_driver/models/smollm2_135m_w64_int16
+```
+
+Verified board runtime:
+
+```text
+VIPLite: 2.0.3.2-AW-2024-08-30
+cid=0x1000003b
+nbg_loaded_once=1
+input: int32 1x64
+output: int16 1x1x49152, dfp=10
+memory_pool_bytes=345088
+peak_rss_kb=280904
+```
+
+Verified W=64 CPU oracle output:
+
+```text
+<|im_start|>assistant
+The capital of France is Paris. It is a city that has a rich history
+```
+
+Verified W=64 NPU int16 output:
+
+```text
+<|im_start|>assistant
+The capital of France is Paris, a city that is known for its rich history
+```
+
+Verified W=64 int16 benchmark with RSS sampler:
+
+```text
+create_network_us=770561
+prepare_network_us=27492
+first_step_wall_us=71560
+first_step_profile_us=64861
+mean_wall_us=69655.812
+mean_profile_us=64891.688
+mean_tok_s=14.356
+peak_rss_kb=280904
+```
+
+Verified usable context window is now `W=64` on the int16 path. Assumption:
+Qwen2.5-0.5B should wait because the requested SmolLM2 `pcq` path already has a
+quality blocker, and Qwen would multiply the same risk with much larger weights
+and a much larger vocabulary.
+
+## Result
+
+Verified: SmolLM2-135M-Instruct passed the NPU-only coherent-text gate with
+`int16` at both `W=32` and `W=64`. Verified: the requested `pcq` int8 path
+converts and executes but fails coherence at `W=32`; treat that as the precise
+int8 blocker before attempting Qwen2.5-0.5B as an int8 deliverable.
 
 ## Next
 
 If int8 is mandatory, proceed to T6 with the `pcq` quality blocker and include
-the logs above. If int16 is accepted for T4, the next technical step is trying
-`W=64` for SmolLM2 before any Qwen2.5-0.5B attempt.
+the logs above. If int16 is accepted for T4, SmolLM2 has passed at `W=64`; the
+next step is either Qwen2.5-0.5B sizing/conversion or T5 porting, depending on
+whether the `pcq` blocker must be resolved first.

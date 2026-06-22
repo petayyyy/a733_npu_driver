@@ -270,6 +270,24 @@
   - Result: SmolLM2-135M-Instruct passes the NPU-only coherent-text gate with
     `int16`; the requested `pcq` int8 path is a precise quality blocker, not an
     op-support or NBG-size blocker.
+  - Verified SmolLM2-135M-Instruct `W=64` int16 build/conversion/run:
+    - ONNX: `work/generated/smollm2_135m_w64/real_llm.onnx`, size
+      `651,529,233` bytes.
+    - Package path: `work/model-packages/smollm2_135m_w64_int16/int16/`.
+    - `network_binary.nb` size: `282,310,408` bytes.
+    - Final NBG export: `Error(0),Warning(0)`.
+    - Board path: `/home/radxa/a733_npu_driver/models/smollm2_135m_w64_int16`.
+    - Runtime metadata: int32 input `1x64`, int16 output `1x1x49152`,
+      `dfp=10`, `memory_pool_bytes=345088`.
+    - CPU oracle output:
+      `The capital of France is Paris. It is a city that has a rich history`.
+    - A733 NPU output:
+      `The capital of France is Paris, a city that is known for its rich history`.
+    - Benchmark with RSS sampler: create network `770.561ms`, prepare
+      `27.492ms`, first-step wall `71.560ms`, first-step NPU profile
+      `64.861ms`, mean wall `69.656ms/token`, mean NPU profile
+      `64.892ms/token`, `14.356 tok/s`, peak RSS `280,904 KB`.
+  - Verified usable context window on the working int16 path is now `W=64`.
 - Reports/scripts added for T4:
   - `reports/t4-real-model.md`
   - `scripts/host/make_real_llm_onnx.py`
@@ -280,6 +298,7 @@
 
 ## Next Gate
 
-T4 branch point: if int8 is mandatory, proceed to T6 with the SmolLM2 `pcq`
-quality blocker. If int16 is acceptable for the first real-model T4 gate, try
-SmolLM2 `W=64` next before attempting Qwen2.5-0.5B.
+T4 branch point: SmolLM2 passes the NPU-only coherent-text gate with int16 at
+`W=64`; the requested `pcq` int8 path has a precise quality blocker. If int8 is
+mandatory, proceed to T6 with the SmolLM2 `pcq` quality blocker before
+attempting Qwen2.5-0.5B as an int8 deliverable.
