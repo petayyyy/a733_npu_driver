@@ -214,13 +214,24 @@
     `651,500,555` bytes.
   - Verified graph output is sliced last-token logits with shape
     `1x1x49152`.
-  - Next: convert the W=32 graph with ACUITY `pcq`; if conversion rejects the
-    graph or hits a size/resource limit, save the full log and record the exact
-    blocker for T6.
+  - Verified ACUITY `pcq` conversion completed for the full W=32 graph.
+    - ONNX import: `SUCCESS`.
+    - Quantization: `Error(0),Warning(61)`.
+    - Final NBG export: `Error(0),Warning(0)`.
+    - Package path: `work/model-packages/smollm2_135m_w32/pcq/`.
+    - `network_binary.nb` size: `153,990,896` bytes.
+    - NBG metadata: int32 input `1x32`, int8 asymmetric affine output
+      `1x1x49152`, scale `0.1845247447490692`, zero point `-55`.
+    - ACUITY export simulator timing: create network `21.508s`, verify graph
+      `44.701s`, one run `7.74266s`.
+    - Verified no `unsupported`, `not support`, or `fallback` blocker appeared
+      in the conversion logs.
+  - Next: upload the W=32 `pcq` package to the Radxa and run it with the T1
+    persistent runner.
 - Report started: `reports/t4-real-model.md`.
 
 ## Next Gate
 
-Continue T4: run SmolLM2-135M-Instruct W=32 ACUITY `pcq` conversion, then board
-validation with the persistent runner if conversion succeeds. Do not start T5
-or T6 unless T4 reaches its success gate or a precise blocker.
+Continue T4: run SmolLM2-135M-Instruct W=32 board validation with the persistent
+runner. Do not start T5 or T6 unless T4 reaches its success gate or a precise
+blocker.

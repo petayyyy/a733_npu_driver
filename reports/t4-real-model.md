@@ -83,8 +83,63 @@ Assumption: the default token window is acceptable for ACUITY calibration while
 the tokenizer-driven prompt/decode path is added for the board run after NBG
 conversion succeeds.
 
+## SmolLM2 W=32 PCQ Conversion
+
+Verified command:
+
+```bash
+scripts/host/convert_onnx_to_nbg.sh \
+  --name smollm2_135m_w32 \
+  --onnx work/generated/smollm2_135m_w32/real_llm.onnx \
+  --dataset work/generated/smollm2_135m_w32/dataset.txt \
+  --quant pcq \
+  --inputs token_ids \
+  --input-size-list 32 \
+  --outputs logits
+```
+
+Verified logs:
+
+```text
+logs/host/t4-smollm2-w32-pcq-convert.log
+logs/host/t4-smollm2-w32-pcq-convert.err.log
+```
+
+Verified conversion result:
+
+```text
+ONNX import: SUCCESS
+quantization: Error(0),Warning(61)
+host inference: completed
+final NBG export: Error(0),Warning(0)
+package: work/model-packages/smollm2_135m_w32/pcq/
+network_binary.nb: 153,990,896 bytes
+```
+
+Verified package metadata:
+
+```text
+input:  token_ids, int32, shape 1x32
+output: logits, int8 asymmetric affine, shape 1x1x49152
+output scale: 0.1845247447490692
+output zero_point: -55
+```
+
+Verified ACUITY export simulator timing:
+
+```text
+Create Neural Network: 21508ms
+Verify Graph: 44701ms
+Run the 1 time: 7742.66ms
+```
+
+Verified: the `Warning(61)` entries are range-metadata warnings of the same
+class seen in T2/T3, e.g. `Edge "..._rms_squared_..." has set the range
+already`. Verified no `unsupported`, `not support`, or `fallback` blocker
+appeared in the conversion logs.
+
 ## Next
 
-Run ACUITY `pcq` conversion for `work/generated/smollm2_135m_w32/real_llm.onnx`.
-If ACUITY rejects the graph or hits a size/resource limit, save the full log
-under `logs/host/` and record the exact blocker here before moving to T6.
+Run the W=32 NBG on the Radxa board through the T1 persistent runner. If
+VIPLite rejects the NBG or the board hits a memory/resource limit, save the full
+log under `logs/board/` and record the exact blocker here before moving to T6.
