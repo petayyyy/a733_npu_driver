@@ -168,8 +168,17 @@ if [ -n "$HYBRID_SEED_QUANTIZE" ]; then
 fi
 
 cd "$REPO_ROOT"
+SDK_SCRIPT_DIR="$AI_SDK_MODELS/../scripts"
 MODEL_DIR="$AI_SDK_MODELS/$NAME"
 PACKAGE_DIR="$PACKAGE_ROOT/$NAME/$QUANT"
+
+[ -d "$SDK_SCRIPT_DIR" ] || die "AI SDK scripts directory not found: $SDK_SCRIPT_DIR"
+[ -f "$SDK_SCRIPT_DIR/pegasus_setup.sh" ] || die "missing AI SDK pegasus_setup.sh in: $SDK_SCRIPT_DIR"
+cp "$SDK_SCRIPT_DIR"/pegasus_*.sh "$AI_SDK_MODELS/"
+cp "$SDK_SCRIPT_DIR/pegasus_setup.sh" "$AI_SDK_MODELS/env.sh"
+if [ -f "$SDK_SCRIPT_DIR/awnet_normalize.py" ]; then
+    cp "$SDK_SCRIPT_DIR/awnet_normalize.py" "$AI_SDK_MODELS/"
+fi
 
 rm -rf "$MODEL_DIR"
 mkdir -p "$MODEL_DIR"

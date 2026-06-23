@@ -645,3 +645,35 @@ Verified result: repository workspace dropped from about `113 GiB` to about
 `2.2 GiB` under `work/`, and host `C:` free space increased to about
 `117 GiB`. Any future ACUITY run must regenerate the deleted ONNX/NBG/model
 workspace artifacts.
+
+## 2026-06-24
+
+- Task T8-qwen-int16-port started and stopped at required Step A host gate.
+  Orange Pi Zero 3W board work was not started because host coherence failed.
+  - Verified cleanup had removed the rebuildable Qwen package, so regenerated
+    the un-smoothed full Qwen2.5-0.5B-Instruct W=32 ONNX from retained HF files:
+    `work/generated/qwen25_05b_w32/real_llm.onnx`, size `1,976,297,294`
+    bytes, `24` layers, `hidden_size=896`, `vocab_size=151,936`,
+    `smoothquant_scales=null`.
+  - Updated `scripts/host/convert_onnx_to_nbg.sh` so rebuilds after cleanup
+    restore the AI SDK `pegasus_*.sh` helpers and expected `env.sh` into the
+    ignored SDK `models/` workspace before launching ACUITY.
+  - Verified regenerated un-smoothed `int16` package:
+    `work/model-packages/qwen25_05b_w32_int16/int16/network_binary.nb`, size
+    `1,064,540,800` bytes; input `token_ids` int32 `1x32`; output logits int16
+    dynamic fixed point `1x1x151936`, `fl=10`.
+  - Verified ACUITY host conversion/export completed:
+    `import SUCCESS`, `quantize SUCCESS`, inference `Error(0),Warning(0)`,
+    export `Error(0),Warning(0)`; simulator timing create `14.448s`, verify
+    `67.124s`, run once `30.921s`.
+  - Verified FP oracle for the same token window:
+    `work/generated/qwen25_05b_w32_oracle/fp_oracle.npz`; oracle top-1 token
+    `198`.
+  - Verified host-vs-oracle Gate A failed:
+    `logs/host/t8-qwen25-05b-w32-int16-vs-fp.json` reports logits cosine
+    `0.236065208`, top-1 mismatch, ACUITY host top-1 `67390` vs FP oracle
+    top-1 `198`, max abs diff `34.059097`, mean abs diff `5.836180`.
+  - Result: this is the T8 stop condition. No Qwen or SmolLM package was
+    uploaded to the Orange Pi at `192.168.31.225`, and no board power-cycle or
+    reset was requested.
+- Report added: `reports/t8-qwen-int16-port.md`.
