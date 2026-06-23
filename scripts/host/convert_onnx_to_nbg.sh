@@ -10,7 +10,7 @@ Usage:
     --name NAME \
     --onnx PATH \
     --dataset PATH \
-    --quant uint8|int16|pcq \
+    --quant uint8|int16|bf16|fp16|pcq \
     --inputs NAMES \
     --input-size-list SIZES \
     --outputs NAMES
@@ -24,6 +24,10 @@ Optional:
                        Existing .quantize file; skip quantize and export only
   --hybrid-seed-quantize PATH
                        Existing .quantize file to seed --hybrid and skip rebuild
+
+Environment:
+  DOCKER_RUN_ARGS      Extra arguments inserted after `docker run --rm`, for
+                       example: --cpus 10 --memory 24g
 EOF
 }
 
@@ -135,8 +139,8 @@ case "$NAME" in
     *[!A-Za-z0-9_.-]*|"") die "--name must contain only letters, digits, dot, underscore, or dash" ;;
 esac
 case "$QUANT" in
-    uint8|int16|pcq) ;;
-    *) die "--quant must be one of: uint8, int16, pcq" ;;
+    uint8|int16|bf16|fp16|pcq) ;;
+    *) die "--quant must be one of: uint8, int16, bf16, fp16, pcq" ;;
 esac
 
 PYTHON=$(find_python) || die "python3 or python is required"
@@ -155,6 +159,9 @@ if [ -n "$SEED_QUANTIZE" ] && [ "$HYBRID" = "1" ]; then
 fi
 if [ -n "$SEED_QUANTIZE" ] && [ -n "$HYBRID_SEED_QUANTIZE" ]; then
     die "--seed-quantize and --hybrid-seed-quantize are mutually exclusive"
+fi
+if [ "$QUANT" = "fp16" ] && [ "$HYBRID" = "1" ]; then
+    die "--hybrid is not supported with --quant fp16"
 fi
 SEED_QUANTIZE_ABS=
 if [ -n "$SEED_QUANTIZE" ]; then
@@ -232,22 +239,73 @@ if items and all(item.lower().endswith(".npy") for item in items):
     inputmeta.write_text(text, encoding="ascii")
     print(f"patched tensor inputmeta for {name}: {inputmeta}")
 PY
-if [ "$HYBRID" = "1" ]; then
-    if [ -z "$HYBRID_SEED_QUANTIZE" ]; then
+if [ "$QUANT" = "fp16" ]; then
+    pushd "$NAME"
+    PEGASUS=$ACUITY_PATH/pegasus
+    if [ ! -e "\$PEGASUS" ]; then
+        PEGASUS="python3 \$PEGASUS.py"
+    fi
+    if [ -n "$SEED_QUANTIZE" ]; then
+        echo "using seeded quantize table: $NAME/${NAME}_fp16.quantize"
+    else
+        cmd="\$PEGASUS quantize \
+            --model         ${NAME}.json \
+            --model-data    ${NAME}.data \
+            --device        CPU \
+            --with-input-meta ${NAME}_inputmeta.yml \
+            --compute-entropy \
+            --rebuild \
+            --model-quantize ${NAME}_fp16.quantize \
+            --quantizer float16 \
+            --qtype float16"
+        echo "\$cmd"
+        eval "\$cmd"
+    fi
+    cmd="\$PEGASUS inference \
+        --model         ${NAME}.json \
+        --model-data    ${NAME}.data \
+        --dtype         quantized \
+        --model-quantize ${NAME}_fp16.quantize \
+        --iterations    1 \
+        --device        CPU \
+        --output-dir    ./inf/${NAME}_fp16 \
+        --postprocess-file ${NAME}_postprocess_file.yml \
+        --with-input-meta ${NAME}_inputmeta.yml"
+    echo "\$cmd"
+    eval "\$cmd"
+    cmd="\$PEGASUS export ovxlib \
+        --model                 ${NAME}.json \
+        --model-data            ${NAME}.data \
+        --dtype                 quantized \
+        --model-quantize        ${NAME}_fp16.quantize \
+        --target-ide-project    'linux64' \
+        --with-input-meta       ${NAME}_inputmeta.yml \
+        --postprocess-file      ${NAME}_postprocess_file.yml \
+        --pack-nbg-unify \
+        --optimize              ${TARGET} \
+        --viv-sdk               ${VIV_SDK} \
+        --output-path           ./wksp/${NAME}_fp16/${NAME}_fp16"
+    echo "\$cmd"
+    eval "\$cmd"
+    popd
+else
+    if [ "$HYBRID" = "1" ]; then
+        if [ -z "$HYBRID_SEED_QUANTIZE" ]; then
+            bash pegasus_quantize.sh "$NAME" "$QUANT"
+        fi
+        bash pegasus_quantize_hybird.sh "$NAME" "$QUANT"
+    elif [ -n "$SEED_QUANTIZE" ]; then
+        echo "using seeded quantize table: $NAME/${NAME}_${QUANT}.quantize"
+    else
         bash pegasus_quantize.sh "$NAME" "$QUANT"
     fi
-    bash pegasus_quantize_hybird.sh "$NAME" "$QUANT"
-elif [ -n "$SEED_QUANTIZE" ]; then
-    echo "using seeded quantize table: $NAME/${NAME}_${QUANT}.quantize"
-else
-    bash pegasus_quantize.sh "$NAME" "$QUANT"
+    bash pegasus_inference.sh "$NAME" "$QUANT"
+    bash pegasus_export_ovx_nbg.sh "$NAME" "$QUANT" "$TARGET" "$VIV_SDK"
 fi
-bash pegasus_inference.sh "$NAME" "$QUANT"
-bash pegasus_export_ovx_nbg.sh "$NAME" "$QUANT" "$TARGET" "$VIV_SDK"
 EOF
 )
 
-MSYS_NO_PATHCONV=1 docker run --rm \
+MSYS_NO_PATHCONV=1 docker run --rm ${DOCKER_RUN_ARGS:-} \
     -v "$DOCKER_REPO_ROOT:/workspace" \
     -w "/workspace/$AI_SDK_MODELS" \
     "$IMAGE" \

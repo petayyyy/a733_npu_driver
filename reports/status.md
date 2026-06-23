@@ -608,6 +608,14 @@
 
 ## Next Gate
 
+T9 outcome: do not upload the T9 Qwen packages to the Orange Pi yet. BF16 fixes
+host quality but fails NBG generation on the full Qwen W=32 graph; FP16 exports
+an NBG but fails the host quality gate. The immediate blocker packet is
+`logs/host/t9-qwen25-05b-w32-bf16-convert.err.log` plus
+`reports/t9-qwen-bf16.md`. If continuing without vendor input, stay host-only
+and treat mixed BF16/int16 seed generation as a new experiment, not as a passed
+T9 gate.
+
 T7 resume point: do not upload the T7 W8A16 packages to the board; the host
 gate failed first. Before continuing ACUITY work, recover `C:` free space or
 move large ignored `work/` artifacts to a larger drive. If continuing T7 after
@@ -677,3 +685,46 @@ workspace artifacts.
     uploaded to the Orange Pi at `192.168.31.225`, and no board power-cycle or
     reset was requested.
 - Report added: `reports/t8-qwen-int16-port.md`.
+
+- Task T9-qwen-bf16 started and stopped at Step 2 host/export gate. Orange Pi
+  Zero 3W board work was not started because no host-quality NBG candidate was
+  produced.
+  - Verified ONNX Runtime vs FP oracle for the existing full
+    Qwen2.5-0.5B-Instruct W=32 graph:
+    `logs/host/t9-qwen25-w32-onnxruntime-vs-fp.json` reports logits cosine
+    `0.9999999999967962`, top-1 match `198`, max abs diff `0.000029087`.
+    Result: the ONNX builder is correct; the T8 `int16` failure is
+    quantization, not graph construction.
+  - Added `scripts/host/compare_onnxruntime_to_oracle.py`.
+  - Updated `scripts/host/convert_onnx_to_nbg.sh` to accept `bf16` and `fp16`,
+    and to pass Docker resource arguments through `DOCKER_RUN_ARGS`. The T9
+    Docker runs used `--cpus 10 --memory 24g`.
+  - Verified BF16 is accepted by ACUITY in `ubuntu-npu:v2.0.10.1`:
+    quantize used `--quantizer qbfloat16 --qtype qbfloat16`, produced
+    `qwen25_05b_w32_bf16_bf16.quantize` of `127,214` bytes, and ACUITY host
+    inference completed.
+  - Verified BF16 host quality passes:
+    `logs/host/t9-qwen25-05b-w32-bf16-host-vs-fp.json` reports logits cosine
+    `0.9906279877646436` and top-1 match `198`.
+  - Verified BF16 NBG export fails before package creation:
+    `logs/host/t9-qwen25-05b-w32-bf16-convert.err.log` records
+    `vnn_VerifyGraph` status `-3`, `Fatal model generation error: 64768`,
+    `Error(1),Warning(0)`, and no `_nbg_unify` export directory. This is the
+    vendor blocker: full Qwen W=32 BF16 graph, input `token_ids` int32 `1x32`,
+    output logits `1x1x151936`; ACUITY emitted no node-level failure name.
+  - Verified ACUITY CLI exposes `float16`; added a direct FP16 path in
+    `convert_onnx_to_nbg.sh` using `--quantizer float16 --qtype float16`.
+  - Verified the first FP16 run failed due to a wrapper working-directory bug,
+    not due to ACUITY qtype rejection; logs preserved under
+    `logs/host/t9-qwen25-05b-w32-fp16-convert.*`.
+  - Fixed the wrapper and verified the FP16 retry exports an NBG:
+    `work/model-packages/qwen25_05b_w32_fp16/fp16/network_binary.nb`, size
+    `991,416,168` bytes; output metadata `dtype=float16`, shape
+    `1x1x151936`; export `Error(0),Warning(0)`.
+  - Verified FP16 host quality fails:
+    `logs/host/t9-qwen25-05b-w32-fp16-vs-fp.json` reports logits cosine
+    `0.5408570190232891`; top-1 happens to match `198`, but the cosine is far
+    below the `>0.99` gate.
+  - No package was uploaded to `192.168.31.225`, and no board reset or
+    power-cycle was requested.
+- Report added: `reports/t9-qwen-bf16.md`.
