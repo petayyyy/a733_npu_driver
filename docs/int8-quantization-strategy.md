@@ -1,7 +1,7 @@
 # INT8 Quantization Strategy
 
 This note condenses the deep analysis in
-`docs/compass_artifact_wf-c8b9b1e6-8be9-4a26-89d0-f72adc08cb62_text_markdown.md`
+`research/a733-vip9000-int8-int4-quantization-root-cause.md`
 and the master-agent summary in `promts/master_about_trouble.md`.
 
 ## Current Decision
