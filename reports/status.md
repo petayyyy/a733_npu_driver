@@ -585,15 +585,36 @@
     - Full W8A16 quality failed: logits cosine `0.253804159`, top-1 mismatch
       `120` vs FP oracle `279`.
   - Report added: `reports/t7-w8a16.md`.
+- Task T7 continuation after host reboot:
+  - Verified no ACUITY Docker containers were still running after reboot.
+  - Verified host `C:` free space was about `13.9 GiB` before continuing.
+  - Tried softer Qwen layer4 smoothing with `alpha=0.25` and `scale_max=8`.
+  - Verified multi-output debug int16 import/quantize path failed
+    reproducibly after ACUITY reported import success: quantize failed while
+    loading a truncated `.data` pickle, and retry left inputmeta/postprocess
+    files at `0` bytes. Logs:
+    `logs/host/t7-qwen25-w32-layer4-smooth-a025-m8-int16-convert*.log`.
+  - Verified logits-only int16 control for the same softer smoothing:
+    `network_binary.nb=596,976,608` bytes, logits cosine `0.982636019`,
+    top-1 match `98964`.
+  - Verified logits-only W8A16 export for the same softer smoothing:
+    `28` transformer weights and `28` transformer biases replaced, lm_head kept
+    int16, `network_binary.nb=554,108,128` bytes, simulator one-run time
+    `14.915s`, logits cosine `0.944911442`, top-1 match `98964`.
+  - Result: softer smoothing improved the int16 control but W8A16 still failed
+    the `>0.99` host cosine gate. The board was not used.
+  - Verified host `C:` free space dropped to about `5.0 GiB`; stopped further
+    ACUITY runs to avoid another disk/memory failure.
 
 ## Next Gate
 
 T7 resume point: do not upload the T7 W8A16 packages to the board; the host
-gate failed first. If continuing T7, stay host-only and try less aggressive
-SmoothQuant settings before any board run, for example lower `alpha`, tighter
-`scale_max`, or smoothing only selected projections. The full-Qwen W8A16 seed
-mechanism itself is unblocked, but the alpha=0.5 full smoothing broke even the
-int16 control.
+gate failed first. Before continuing ACUITY work, recover `C:` free space or
+move large ignored `work/` artifacts to a larger drive. If continuing T7 after
+cleanup, stay host-only and try still more conservative settings such as
+smoothing only selected projections or testing no-smoothing W8A16 as a control.
+The full-Qwen W8A16 seed mechanism itself is unblocked, but tested smoothing
+settings still fail the host quality gate.
 
 T4 Qwen hardware point remains unchanged: full Qwen `int16` exports on host but
 is too large for the 1GiB Radxa board. Full Qwen seeded `pcq` also exports on
