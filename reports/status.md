@@ -538,17 +538,68 @@
     SmolLM2 remains W=32/W=64 int16 only. Vendor blocker packet added at
     `reports/t6-vendor-acuity-hybrid-quantize-table.md`.
 
+## 2026-06-23
+
+- Task T7 W8A16 host gate started and stopped at host no-go; the A733 board was
+  not used because host cosine/top-1 gates did not pass.
+  - Added SmoothQuant/W8A16 host tooling:
+    `scripts/host/make_real_llm_smoothquant_scales.py`,
+    `scripts/host/make_w8a16_quantize.py`,
+    `scripts/host/dump_real_llm_oracle.py`, and
+    `scripts/host/compare_acuity_host_to_oracle.py`.
+  - Updated `scripts/host/make_real_llm_onnx.py` with
+    `--smoothquant-scales` and `--debug-layer-outputs`.
+  - Verified ACUITY multi-output import requires space-separated output names,
+    not comma-separated names.
+  - Verified Qwen layer1 SmoothQuant+W8A16 diagnostic:
+    - int16 host baseline vs FP oracle: logits cosine `0.999240800`, top-1
+      match `145375`, `layer0_mlp_resid` cosine `0.999928024`.
+    - all-W8A16 host: logits cosine `0.966207707`, top-1 mismatch
+      `75116` vs `145375`, `layer0_mlp_resid` cosine `0.974614678`.
+    - `--force-int16-layers 0` restored the int16 baseline metrics, proving the
+      per-layer widening mechanism works.
+  - Verified Qwen layer4 SmoothQuant+W8A16 diagnostic using 12 calibration
+    windows:
+    - int16 host baseline: logits cosine `0.976815224`, top-1 match `98964`,
+      layer residue cosines all at least `0.999922320`, final RMS cosine
+      `0.965543317`.
+    - all-W8A16 host: logits cosine `0.865333108`, top-1 mismatch
+      `69526` vs `98964`; layer0 and layer1 residues collapsed to
+      `0.961890764` and `0.944705466`.
+    - forcing layer0 int16 restored layer0 and matched logits top-1, but
+      end-to-end logits cosine remained `0.955682086`.
+    - forcing layers `0,3` still failed top-1 and logits cosine was
+      `0.963802511`.
+  - Verified full Qwen W=32 SmoothQuant+W8A16 host gate:
+    - SmoothQuant scales were collected for all 24 layers from 12 calibration
+      windows (`96` scale vectors).
+    - The full smoothed int16 control exported, but failed the FP oracle host
+      gate: `network_binary.nb=1,056,640,512` bytes, logits cosine
+      `0.474032621`, top-1 mismatch `6496` vs `279`.
+    - The full W8A16 seed bypassed the previous full-Qwen zero-byte
+      quantize-table rebuild blocker: `168` transformer weights and `168`
+      transformer biases replaced; tied lm_head kept int16.
+    - The full W8A16 package exported:
+      `work/model-packages/qwen25_05b_w32_smooth_w8a16/pcq/network_binary.nb`,
+      size `814,283,520` bytes, simulator one-run time `42.845s`.
+    - Full W8A16 quality failed: logits cosine `0.253804159`, top-1 mismatch
+      `120` vs FP oracle `279`.
+  - Report added: `reports/t7-w8a16.md`.
+
 ## Next Gate
 
-T4 Qwen resume point: full Qwen `int16` exports on host but is too large for the
-1GiB Radxa board. Full Qwen seeded `pcq` now also exports on host
-(`network_binary.nb=587,912,960`) after importing with `--input-size-list 32`,
-but the board runner is killed with `status=137` before VIPLite metadata
-(`peak_rss_kb=574,132`). Hardware bisection on this board found the current
-runnable partial ceiling at 7 Qwen decoder layers (`W=32`, `pcq`,
-`network_binary.nb=357,150,496`, peak RSS `350,496 KB`); 8 layers exports on
-host but is too large for this board runtime.
+T7 resume point: do not upload the T7 W8A16 packages to the board; the host
+gate failed first. If continuing T7, stay host-only and try less aggressive
+SmoothQuant settings before any board run, for example lower `alpha`, tighter
+`scale_max`, or smoothing only selected projections. The full-Qwen W8A16 seed
+mechanism itself is unblocked, but the alpha=0.5 full smoothing broke even the
+int16 control.
 
-T5 resume point: wait for ACUITY/vendor fix or workaround for hybrid
-quantize-table serialization; no further local int8/hybrid recovery path is
-currently unblocked.
+T4 Qwen hardware point remains unchanged: full Qwen `int16` exports on host but
+is too large for the 1GiB Radxa board. Full Qwen seeded `pcq` also exports on
+host (`network_binary.nb=587,912,960`) but the board runner is killed with
+`status=137` before VIPLite metadata (`peak_rss_kb=574,132`). Hardware bisection
+on this board found the current runnable partial ceiling at 7 Qwen decoder
+layers (`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS
+`350,496 KB`); 8 layers exports on host but is too large for this board
+runtime.

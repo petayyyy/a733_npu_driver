@@ -159,7 +159,7 @@ def add_gqa_repeat(nodes: list[onnx.NodeProto], prefix: str, x: str) -> str:
     return out
 
 
-def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
+def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str, use_smoothquant: bool) -> str:
     norm = add_rms_norm(nodes, f"{prefix}_attn_rms", hidden, f"{prefix}_attn_gamma")
     q_linear = f"{prefix}_q_linear"
     k_linear = f"{prefix}_k_linear"
@@ -204,6 +204,7 @@ def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
     ctx = f"{prefix}_ctx"
     ctx_t = f"{prefix}_ctx_t"
     ctx_flat = f"{prefix}_ctx_flat"
+    ctx_smooth = f"{prefix}_ctx_smooth"
     attn_out = f"{prefix}_attn_out"
     out = f"{prefix}_attn_resid"
 
@@ -217,20 +218,30 @@ def add_attention(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
             helper.make_node("MatMul", [probs, v_rep], [ctx], name=f"{prefix}_attn_context"),
             helper.make_node("Transpose", [ctx], [ctx_t], name=f"{prefix}_ctx_transpose", perm=[0, 2, 1, 3]),
             helper.make_node("Reshape", [ctx_t, "shape_hidden"], [ctx_flat], name=f"{prefix}_ctx_merge_heads"),
-            helper.make_node("MatMul", [ctx_flat, f"{prefix}_wo"], [attn_out], name=f"{prefix}_out_proj"),
+        ]
+    )
+    if use_smoothquant:
+        nodes.append(helper.make_node("Mul", [ctx_flat, f"{prefix}_ctx_smooth_inv"], [ctx_smooth], name=f"{prefix}_ctx_smooth"))
+        out_proj_input = ctx_smooth
+    else:
+        out_proj_input = ctx_flat
+    nodes.extend(
+        [
+            helper.make_node("MatMul", [out_proj_input, f"{prefix}_wo"], [attn_out], name=f"{prefix}_out_proj"),
             helper.make_node("Add", [hidden, attn_out], [out], name=f"{prefix}_attn_residual"),
         ]
     )
     return out
 
 
-def add_swiglu(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
+def add_swiglu(nodes: list[onnx.NodeProto], prefix: str, hidden: str, use_smoothquant: bool) -> str:
     norm = add_rms_norm(nodes, f"{prefix}_mlp_rms", hidden, f"{prefix}_mlp_gamma")
     gate = f"{prefix}_gate"
     up = f"{prefix}_up"
     gate_sigmoid = f"{prefix}_gate_sigmoid"
     silu = f"{prefix}_silu"
     gated = f"{prefix}_gated"
+    gated_smooth = f"{prefix}_gated_smooth"
     down = f"{prefix}_down"
     out = f"{prefix}_mlp_resid"
 
@@ -241,16 +252,32 @@ def add_swiglu(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
             helper.make_node("Sigmoid", [gate], [gate_sigmoid], name=f"{prefix}_sigmoid"),
             helper.make_node("Mul", [gate, gate_sigmoid], [silu], name=f"{prefix}_silu"),
             helper.make_node("Mul", [silu, up], [gated], name=f"{prefix}_swiglu_mul"),
-            helper.make_node("MatMul", [gated, f"{prefix}_w_down"], [down], name=f"{prefix}_down_proj"),
+        ]
+    )
+    if use_smoothquant:
+        nodes.append(
+            helper.make_node(
+                "Mul",
+                [gated, f"{prefix}_gated_smooth_inv"],
+                [gated_smooth],
+                name=f"{prefix}_gated_smooth",
+            )
+        )
+        down_input = gated_smooth
+    else:
+        down_input = gated
+    nodes.extend(
+        [
+            helper.make_node("MatMul", [down_input, f"{prefix}_w_down"], [down], name=f"{prefix}_down_proj"),
             helper.make_node("Add", [hidden, down], [out], name=f"{prefix}_mlp_residual"),
         ]
     )
     return out
 
 
-def add_decoder_layer(nodes: list[onnx.NodeProto], prefix: str, hidden: str) -> str:
-    after_attn = add_attention(nodes, prefix, hidden)
-    return add_swiglu(nodes, prefix, after_attn)
+def add_decoder_layer(nodes: list[onnx.NodeProto], prefix: str, hidden: str, use_smoothquant: bool) -> str:
+    after_attn = add_attention(nodes, prefix, hidden, use_smoothquant)
+    return add_swiglu(nodes, prefix, after_attn, use_smoothquant)
 
 
 def reshape_gamma(value: np.ndarray) -> np.ndarray:
@@ -261,7 +288,37 @@ def linear_weight(value: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(value.T)
 
 
-def build_initializers(reader: SafeTensorReader, config: dict[str, Any], seq: int, layers: int) -> list[onnx.TensorProto]:
+def load_smoothquant(path: Path | None) -> dict[str, np.ndarray]:
+    if path is None:
+        return {}
+    arrays = np.load(path)
+    return {key: np.asarray(arrays[key], dtype=np.float32) for key in arrays.files if not key.startswith("__")}
+
+
+def smooth_scale(smoothquant: dict[str, np.ndarray], key: str, size: int) -> np.ndarray:
+    if not smoothquant:
+        return np.ones(size, dtype=np.float32)
+    if key not in smoothquant:
+        raise KeyError(f"missing SmoothQuant scale {key!r}")
+    scale = np.asarray(smoothquant[key], dtype=np.float32).reshape(-1)
+    if scale.shape != (size,):
+        raise ValueError(f"SmoothQuant scale {key!r} has shape {scale.shape}, expected {(size,)}")
+    if not np.all(np.isfinite(scale)) or np.any(scale <= 0.0):
+        raise ValueError(f"SmoothQuant scale {key!r} contains non-positive or non-finite values")
+    return scale
+
+
+def scale_linear_input(weight: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(linear_weight(weight) * scale.reshape(-1, 1), dtype=np.float32)
+
+
+def build_initializers(
+    reader: SafeTensorReader,
+    config: dict[str, Any],
+    seq: int,
+    layers: int,
+    smoothquant: dict[str, np.ndarray] | None = None,
+) -> list[onnx.TensorProto]:
     dim = int(config["hidden_size"])
     n_heads = int(config["num_attention_heads"])
     n_kv_heads = int(config.get("num_key_value_heads", n_heads))
@@ -301,16 +358,27 @@ def build_initializers(reader: SafeTensorReader, config: dict[str, Any], seq: in
         i64_tensor("sequence_axis", [1]),
     ]
 
+    smoothquant = smoothquant or {}
     for layer in range(layers):
         hf = f"model.layers.{layer}"
         prefix = f"layer{layer}"
+        attn_scale = smooth_scale(smoothquant, f"{prefix}.attn_norm", dim)
+        mlp_scale = smooth_scale(smoothquant, f"{prefix}.mlp_norm", dim)
+        ctx_scale = smooth_scale(smoothquant, f"{prefix}.ctx", dim)
+        gated_scale = smooth_scale(smoothquant, f"{prefix}.gated", int(config["intermediate_size"]))
         values.extend(
             [
-                f32_tensor(f"{prefix}_attn_gamma", reshape_gamma(reader.tensor(f"{hf}.input_layernorm.weight"))),
-                f32_tensor(f"{prefix}_mlp_gamma", reshape_gamma(reader.tensor(f"{hf}.post_attention_layernorm.weight"))),
-                f32_tensor(f"{prefix}_wq", linear_weight(reader.tensor(f"{hf}.self_attn.q_proj.weight"))),
-                f32_tensor(f"{prefix}_wk", linear_weight(reader.tensor(f"{hf}.self_attn.k_proj.weight"))),
-                f32_tensor(f"{prefix}_wv", linear_weight(reader.tensor(f"{hf}.self_attn.v_proj.weight"))),
+                f32_tensor(
+                    f"{prefix}_attn_gamma",
+                    reshape_gamma(reader.tensor(f"{hf}.input_layernorm.weight") / attn_scale),
+                ),
+                f32_tensor(
+                    f"{prefix}_mlp_gamma",
+                    reshape_gamma(reader.tensor(f"{hf}.post_attention_layernorm.weight") / mlp_scale),
+                ),
+                f32_tensor(f"{prefix}_wq", scale_linear_input(reader.tensor(f"{hf}.self_attn.q_proj.weight"), attn_scale)),
+                f32_tensor(f"{prefix}_wk", scale_linear_input(reader.tensor(f"{hf}.self_attn.k_proj.weight"), attn_scale)),
+                f32_tensor(f"{prefix}_wv", scale_linear_input(reader.tensor(f"{hf}.self_attn.v_proj.weight"), attn_scale)),
                 f32_tensor(f"{prefix}_bq", reader.optional_tensor(f"{hf}.self_attn.q_proj.bias", (dim,))),
                 f32_tensor(
                     f"{prefix}_bk",
@@ -320,12 +388,22 @@ def build_initializers(reader: SafeTensorReader, config: dict[str, Any], seq: in
                     f"{prefix}_bv",
                     reader.optional_tensor(f"{hf}.self_attn.v_proj.bias", (n_kv_heads * head_dim,)),
                 ),
-                f32_tensor(f"{prefix}_wo", linear_weight(reader.tensor(f"{hf}.self_attn.o_proj.weight"))),
-                f32_tensor(f"{prefix}_w_gate", linear_weight(reader.tensor(f"{hf}.mlp.gate_proj.weight"))),
-                f32_tensor(f"{prefix}_w_up", linear_weight(reader.tensor(f"{hf}.mlp.up_proj.weight"))),
-                f32_tensor(f"{prefix}_w_down", linear_weight(reader.tensor(f"{hf}.mlp.down_proj.weight"))),
+                f32_tensor(f"{prefix}_wo", scale_linear_input(reader.tensor(f"{hf}.self_attn.o_proj.weight"), ctx_scale)),
+                f32_tensor(f"{prefix}_w_gate", scale_linear_input(reader.tensor(f"{hf}.mlp.gate_proj.weight"), mlp_scale)),
+                f32_tensor(f"{prefix}_w_up", scale_linear_input(reader.tensor(f"{hf}.mlp.up_proj.weight"), mlp_scale)),
+                f32_tensor(f"{prefix}_w_down", scale_linear_input(reader.tensor(f"{hf}.mlp.down_proj.weight"), gated_scale)),
             ]
         )
+        if smoothquant:
+            values.extend(
+                [
+                    f32_tensor(f"{prefix}_ctx_smooth_inv", (1.0 / ctx_scale).reshape(1, 1, dim)),
+                    f32_tensor(
+                        f"{prefix}_gated_smooth_inv",
+                        (1.0 / gated_scale).reshape(1, 1, int(config["intermediate_size"])),
+                    ),
+                ]
+            )
     return values
 
 
@@ -355,6 +433,8 @@ def build_model(
     token_values: list[int] | None,
     max_layers: int | None,
     check_model: bool,
+    smoothquant_path: Path | None,
+    debug_layer_outputs: bool,
 ) -> None:
     config = read_config(model_dir / "config.json")
     if config.get("rope_interleaved") not in (None, False):
@@ -374,6 +454,8 @@ def build_model(
     if layers <= 0 or layers > int(config["num_hidden_layers"]):
         raise ValueError(f"--max-layers must be in [1, {config['num_hidden_layers']}]")
 
+    smoothquant = load_smoothquant(smoothquant_path)
+    use_smoothquant = bool(smoothquant)
     output_dir.mkdir(parents=True, exist_ok=True)
     tokens = np.asarray([token_values if token_values is not None else default_tokens(config, seq)], dtype=np.int32)
     if tokens.shape != (BATCH, seq):
@@ -383,9 +465,17 @@ def build_model(
         helper.make_node("Gather", ["token_embed", "token_ids"], ["hidden0"], name="token_gather", axis=0)
     ]
     hidden = "hidden0"
+    model_outputs = [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, 1, vocab])]
+    output_names = ["logits"]
     for layer in range(layers):
-        hidden = add_decoder_layer(nodes, f"layer{layer}", hidden)
+        hidden = add_decoder_layer(nodes, f"layer{layer}", hidden, use_smoothquant)
+        if debug_layer_outputs:
+            model_outputs.append(helper.make_tensor_value_info(hidden, TensorProto.FLOAT, [BATCH, seq, dim]))
+            output_names.append(hidden)
     final = add_rms_norm(nodes, "final_rms", hidden, "final_rms_gamma")
+    if debug_layer_outputs:
+        model_outputs.append(helper.make_tensor_value_info(final, TensorProto.FLOAT, [BATCH, seq, dim]))
+        output_names.append("final_rms_out")
     nodes.append(
         helper.make_node(
             "Slice",
@@ -403,8 +493,8 @@ def build_model(
             nodes,
             f"real_llm_fixed_w{seq}",
             [helper.make_tensor_value_info("token_ids", TensorProto.INT32, [BATCH, seq])],
-            [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, 1, vocab])],
-            build_initializers(reader, config, seq, layers),
+            model_outputs,
+            build_initializers(reader, config, seq, layers, smoothquant),
         )
     finally:
         reader.close()
@@ -427,7 +517,7 @@ def build_model(
     )
     (output_dir / "dataset.txt").write_text("token_ids.npy\n", encoding="ascii")
     (output_dir / "inputs_outputs.txt").write_text(
-        f"--inputs token_ids --input-size-list '{seq}' --outputs logits\n",
+        f"--inputs token_ids --input-size-list '{seq}' --outputs {' '.join(output_names)}\n",
         encoding="ascii",
     )
     (output_dir / "model_info.json").write_text(
@@ -447,6 +537,9 @@ def build_model(
                 "tie_word_embeddings": bool(config.get("tie_word_embeddings", False)),
                 "lm_head": "transpose(model.embed_tokens.weight)",
                 "output": "last-token logits",
+                "output_names": output_names,
+                "debug_layer_outputs": debug_layer_outputs,
+                "smoothquant_scales": str(smoothquant_path) if smoothquant_path else None,
                 "onnx_path": str(onnx_path),
             },
             indent=2,
@@ -468,12 +561,31 @@ def main() -> None:
         type=int,
         help="diagnostic limit; omit for the real full-depth T4 graph",
     )
+    parser.add_argument(
+        "--smoothquant-scales",
+        type=Path,
+        help="NPZ file from make_real_llm_smoothquant_scales.py with per-layer smoothing scales",
+    )
+    parser.add_argument(
+        "--debug-layer-outputs",
+        action="store_true",
+        help="also expose each decoder layer output and final RMSNorm output for host cosine checks",
+    )
     parser.add_argument("--no-check", action="store_true", help="skip onnx.checker for very large debug builds")
     args = parser.parse_args()
 
     config = read_config(args.model_dir / "config.json")
     tokens = parse_tokens(args.tokens, args.seq_len, int(config["vocab_size"])) if args.tokens else None
-    build_model(args.model_dir, args.output_dir, args.seq_len, tokens, args.max_layers, not args.no_check)
+    build_model(
+        args.model_dir,
+        args.output_dir,
+        args.seq_len,
+        tokens,
+        args.max_layers,
+        not args.no_check,
+        args.smoothquant_scales,
+        args.debug_layer_outputs,
+    )
 
 
 if __name__ == "__main__":
