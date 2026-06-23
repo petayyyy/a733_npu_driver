@@ -624,3 +624,24 @@ on this board found the current runnable partial ceiling at 7 Qwen decoder
 layers (`W=32`, `pcq`, `network_binary.nb=357,150,496`, peak RSS
 `350,496 KB`); 8 layers exports on host but is too large for this board
 runtime.
+
+## Cleanup
+
+Verified on 2026-06-23: removed rebuildable ignored artifacts to recover host
+disk space after ACUITY work filled the repository directory:
+
+- deleted `work/ai-sdk/ZIFENG278-ai-sdk/models/` ACUITY import/quantize/export
+  workspaces;
+- deleted `work/generated/` ONNX/calibration/seed outputs;
+- deleted `work/model-packages/` NBG packages;
+- deleted `_upload_bundle/`;
+- deleted `docker_images_v2.0.x/` Docker image archive bundle.
+
+Verified retained: source code, reports, prompts, logs, the host SDK checkout
+outside `work/ai-sdk/ZIFENG278-ai-sdk/models/`, and HF source model files under
+`work/models/`.
+
+Verified result: repository workspace dropped from about `113 GiB` to about
+`2.2 GiB` under `work/`, and host `C:` free space increased to about
+`117 GiB`. Any future ACUITY run must regenerate the deleted ONNX/NBG/model
+workspace artifacts.
