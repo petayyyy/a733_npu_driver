@@ -835,8 +835,7 @@ workspace artifacts.
       cosine `0.999999995`, top-1 match.
     - SmolLM2-1.7B W=32/64/128/256: cosine `1.000000000`, top-1 match.
   - Updated `reports/b1-benchmark-matrix.md` with all ONNX Runtime gate rows;
-    ACUITY int16 host gates and board measurements remain pending except for
-    the already recorded 135M/W32 host-sim failure.
+    ACUITY int16 host gates were recorded in later B1 entries.
   - Added `scripts/host/run-b1-acuity-int16-gates.ps1` for sequential ACUITY
     int16 host gates. The helper runs conversion with
     `DOCKER_RUN_ARGS="--cpus 10 --memory 24g"` and then compares packaged
@@ -869,19 +868,28 @@ workspace artifacts.
     failed at `gen_nbg`: manual final-stage retry emitted VX node/tensor
     creation failures (`Create view tensor failed`, `Create VX tensor failed`)
     and exited `139`, leaving a `0` byte `network_binary.nb`. The W=32 cell
-    was not run on the board under the literal host-gate rule. Remaining 1.7B
-    W=64/W=128/W=256 ACUITY int16 host gates are still pending.
+    was not run on the board under the literal host-gate rule. Later 1.7B
+    windows were recorded below.
   - Verified SmolLM2-1.7B-Instruct W=64 ACUITY int16 host gate fails:
     cosine `0.285665032`, top-1 `198` vs oracle `504`. ACUITY import,
     quantize, and host inference completed; export again left a `0` byte
     `network_binary.nb`, so no valid NBG package was produced and no board run
-    was started. Remaining 1.7B W=128/W=256 ACUITY int16 host gates are still
-    pending.
+    was started. Later 1.7B windows were recorded below.
   - Verified SmolLM2-1.7B-Instruct W=128 ACUITY int16 host gate fails:
     cosine `0.222273584`, top-1 `970` vs oracle `504`. ACUITY import,
     quantize, and host inference completed; export again left a `0` byte
     `network_binary.nb`, so no valid NBG package was produced and no board run
-    was started. Remaining 1.7B W=256 ACUITY int16 host gate is still pending.
+    was started.
+  - Verified SmolLM2-1.7B-Instruct W=256 ACUITY int16 host gate fails:
+    cosine `0.125920514`, top-1 `32084` vs oracle `504`. ACUITY import,
+    quantize, host inference, export-data packing, and OVX C compilation
+    completed; export again left a `0` byte `network_binary.nb` under the SDK
+    workspace and no valid NBG package was produced. No B1 board run was
+    started under the literal host-gate rule.
+  - Completed `reports/b1-benchmark-matrix.md`: all `12` ONNX Runtime gates
+    passed with top-1 match, all `12` ACUITY int16 host gates failed the
+    literal `>=0.99` cosine rule, and therefore no B1 candidate advanced to
+    Orange Pi measurement.
 
 - Task B4-qwen-cpu-baseline completed as a CPU diagnostic fallback baseline,
   not an NPU project gate.

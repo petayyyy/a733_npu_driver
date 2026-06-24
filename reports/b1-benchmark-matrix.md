@@ -2,7 +2,9 @@
 
 Date: 2026-06-24
 
-Status: in progress.
+Status: complete. All model/window rows passed the ONNX Runtime oracle gate,
+but all ACUITY int16 host gates failed the literal B1 `>=0.99` cosine rule; no
+Orange Pi board runs were started for B1 candidates.
 
 ## Scope
 
@@ -40,7 +42,7 @@ tokens and left-pads with zero when `W` is larger than the prompt. This matches
 | SmolLM2-1.7B-Instruct | 32 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.268220295`, top-1 mismatch `31532` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; `gen_nbg` segfaulted before valid NBG | 0 bytes (`gen_nbg` failed) |
 | SmolLM2-1.7B-Instruct | 64 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.285665032`, top-1 mismatch `198` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; ACUITY export left 0-byte NBG | 0 bytes (`gen_nbg` failed) |
 | SmolLM2-1.7B-Instruct | 128 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.222273584`, top-1 mismatch `970` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; ACUITY export left 0-byte NBG | 0 bytes (`gen_nbg` failed) |
-| SmolLM2-1.7B-Instruct | 256 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
+| SmolLM2-1.7B-Instruct | 256 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.125920514`, top-1 mismatch `32084` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; ACUITY export left 0-byte NBG | 0 bytes (`gen_nbg` failed) |
 
 ## Notes
 
@@ -68,3 +70,6 @@ tokens and left-pads with zero when `W` is larger than the prompt. This matches
   `real_llm.onnx.data` sidecars of about `6.85 GB`.
 - Verified all 12 model/window ONNX graphs pass the FP oracle gate with top-1
   match. Evidence is in `logs/host/b1-smollm2-*-onnxruntime-vs-fp.json`.
+- Verified all 12 ACUITY int16 host gates fail the literal B1 `>=0.99` rule.
+  The final 1.7B/W256 row reports cosine `0.125920514`, top-1 mismatch
+  `32084` vs oracle `504`, and a `0` byte `network_binary.nb` after export.
