@@ -837,3 +837,21 @@ workspace artifacts.
   - Updated `reports/b1-benchmark-matrix.md` with all ONNX Runtime gate rows;
     ACUITY int16 host gates and board measurements remain pending except for
     the already recorded 135M/W32 host-sim failure.
+  - Added `scripts/host/run-b1-acuity-int16-gates.ps1` for sequential ACUITY
+    int16 host gates. The helper runs conversion with
+    `DOCKER_RUN_ARGS="--cpus 10 --memory 24g"` and then compares packaged
+    ACUITY host output against the FP oracle.
+  - Verified SmolLM2-135M-Instruct ACUITY int16 host gates for all windows;
+    all fail the literal `>=0.99` B1 gate and therefore were not run on the
+    board under the literal method:
+    - W=32: cosine `0.777693043`, top-1 `1672` vs oracle `504`, NBG
+      `280,882,632` bytes.
+    - W=64: cosine `-0.761936835`, top-1 `347` vs oracle `2`, NBG
+      `282,310,408` bytes.
+    - W=128: cosine `-0.590862935`, top-1 `407` vs oracle `198`, NBG
+      `286,894,144` bytes.
+    - W=256: cosine `-0.784897858`, top-1 `46161` vs oracle `198`, NBG
+      `337,090,160` bytes.
+  - Verified SmolLM2-360M-Instruct W=32 ACUITY int16 host gate fails:
+    cosine `0.131091912`, top-1 `99` vs oracle `57`, NBG `672,715,688`
+    bytes. Remaining 360M and 1.7B ACUITY int16 host gates are still pending.
