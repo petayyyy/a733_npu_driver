@@ -12,20 +12,113 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import struct
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
-from tokenizers import Tokenizer
+try:
+    from tokenizers import Tokenizer as HfTokenizer
+except ImportError:  # pragma: no cover - depends on host environment.
+    HfTokenizer = None
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+BOARD_SCRIPT_DIR = SCRIPT_DIR.parent / "board"
+if str(BOARD_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(BOARD_SCRIPT_DIR))
 
-from make_real_llm_onnx import SafeTensorReader  # noqa: E402
-from smollm2_tokenizer import DEFAULT_SYSTEM, parse_ids, render_chat  # noqa: E402
-from qwen2_tokenizer import DEFAULT_SYSTEM as QWEN2_DEFAULT_SYSTEM  # noqa: E402
-from qwen2_tokenizer import render_chat as render_qwen2_chat  # noqa: E402
+from smollm2_chat import SmolTokenizer  # noqa: E402
+
+DEFAULT_SYSTEM = "You are a helpful AI assistant named SmolLM, trained by Hugging Face"
+QWEN2_DEFAULT_SYSTEM = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+
+
+class SafeTensorReader:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.handle = path.open("rb")
+        header_len = struct.unpack("<Q", self.handle.read(8))[0]
+        self.header = json.loads(self.handle.read(header_len))
+        self.data_start = 8 + header_len
+
+    def close(self) -> None:
+        self.handle.close()
+
+    def tensor(self, name: str) -> np.ndarray:
+        if name not in self.header:
+            raise KeyError(f"missing tensor in {self.path}: {name}")
+        info = self.header[name]
+        dtype = str(info["dtype"]).upper()
+        shape = tuple(int(dim) for dim in info["shape"])
+        start, end = (int(value) for value in info["data_offsets"])
+        self.handle.seek(self.data_start + start)
+        data = self.handle.read(end - start)
+        if dtype == "BF16":
+            raw = np.frombuffer(data, dtype="<u2").astype(np.uint32)
+            return (raw << 16).view(np.float32).reshape(shape).copy()
+        if dtype == "F32":
+            return np.frombuffer(data, dtype="<f4").reshape(shape).copy()
+        if dtype == "F16":
+            return np.frombuffer(data, dtype="<f2").astype(np.float32).reshape(shape)
+        raise ValueError(f"unsupported tensor dtype for {name}: {dtype}")
+
+    def optional_tensor(self, name: str, shape: tuple[int, ...]) -> np.ndarray:
+        if name in self.header:
+            value = self.tensor(name)
+            if value.shape != shape:
+                raise ValueError(f"unexpected tensor shape for {name}: {value.shape}, expected {shape}")
+            return value
+        return np.zeros(shape, dtype=np.float32)
+
+
+class Encoded:
+    def __init__(self, ids: list[int]) -> None:
+        self.ids = ids
+
+
+class FallbackTokenizer:
+    def __init__(self, tokenizer_json: Path) -> None:
+        self._fallback = SmolTokenizer(tokenizer_json)
+
+    @classmethod
+    def from_file(cls, path: str) -> "FallbackTokenizer":
+        return cls(Path(path))
+
+    def encode(self, text: str) -> Encoded:
+        return Encoded(self._fallback.encode(text))
+
+    def decode(self, ids: Iterable[int], skip_special_tokens: bool = False) -> str:
+        return self._fallback.decode(ids, skip_special=skip_special_tokens)
+
+
+Tokenizer = HfTokenizer if HfTokenizer is not None else FallbackTokenizer
+
+
+def parse_ids(text: str) -> list[int]:
+    return [int(part) for part in text.replace(",", " ").split()]
+
+
+def render_chat(user: str, system: str | None, add_generation_prompt: bool) -> str:
+    parts: list[str] = []
+    if system is not None:
+        parts.append(f"<|im_start|>system\n{system}<|im_end|>\n")
+    parts.append(f"<|im_start|>user\n{user}<|im_end|>\n")
+    if add_generation_prompt:
+        parts.append("<|im_start|>assistant\n")
+    return "".join(parts)
+
+
+def render_qwen2_chat(
+    user: str,
+    system: str = QWEN2_DEFAULT_SYSTEM,
+    add_generation_prompt: bool = True,
+) -> str:
+    text = f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n"
+    if add_generation_prompt:
+        text += "<|im_start|>assistant\n"
+    return text
 
 
 def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:

@@ -1006,3 +1006,35 @@ workspace artifacts.
   - Result: B3 passes as an Orange Pi proof-of-concept VLM-on-NPU path:
     vision encoder plus tiny projector/bridge/decoder/logits run on NPU.
   - Report added: `reports/b3-vlm-orangepi.md`.
+
+- Task B1b-matrix-fix completed on the Orange Pi Zero 3W.
+  - Corrected B1 methodology: kept the B1 FP builder/oracle gate, excluded
+    SmolLM2-1.7B because B1 verified every window is NBG export-blocked, and
+    replaced the broken ACUITY `pegasus inference` host-cosine board filter
+    with real on-board decoded coherence.
+  - Added `scripts/board/b1b_benchmark_smollm2.py` and
+    `scripts/board/run-b1b-matrix.sh`. The board helper uses the persistent
+    `npu_lm_runner --protocol`, samples RSS from process start so NBG load is
+    included, and uses B1's zero left-padding for W=64/128/256.
+  - Updated `scripts/host/smollm2_numpy_reference.py` so the FP continuation
+    tool can run in the minimal host Python environment without external
+    `tokenizers` or `onnx` imports.
+  - Verified all 8 exporting B1 int16 NBGs on board, one NPU job at a time:
+    135M and 360M at W=32/64/128/256. Every run logged VIPLite
+    `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`, `network_core_count=1`,
+    `protocol=stdio`, and `nbg_loaded_once=1`.
+  - Verified final matrix highlights:
+    - 135M/W32: coherent, exact FP token-prefix match `16/16`, `20.743 tok/s`,
+      first token `47.6ms`, peak RSS `271.8 MiB`.
+    - 135M/W64: weak but coherent decoded text, `13.980 tok/s`, first token
+      `72.1ms`, peak RSS `274.2 MiB`.
+    - 135M/W128 and W=256: not coherent; W=256 also below the ~3 tok/s line
+      at `1.163 tok/s`.
+    - 360M/W32 and W=64: coherent on board despite host-gate failure;
+      `8.448 tok/s` and `4.903 tok/s`.
+    - 360M/W128 and W=256: not coherent and below ~3 tok/s (`1.993` and
+      `1.202 tok/s`).
+  - Verified board preflight and cleanup: no unrelated NPU/llama/build jobs
+    or `/dev/vipcore` users were present for the run; temporary B1b NBG copies
+    were removed afterward, restoring root filesystem usage from 95% to 82%.
+  - Report added: `reports/b1b-benchmark-matrix.md`.
