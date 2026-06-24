@@ -73,6 +73,10 @@ def i64_tensor(name: str, value: np.ndarray | list[int]) -> onnx.TensorProto:
     return numpy_helper.from_array(np.asarray(value, dtype=np.int64), name=name)
 
 
+def i32_tensor(name: str, value: np.ndarray | list[int]) -> onnx.TensorProto:
+    return numpy_helper.from_array(np.asarray(value, dtype=np.int32), name=name)
+
+
 def read_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -281,6 +285,57 @@ def add_decoder_layer(nodes: list[onnx.NodeProto], prefix: str, hidden: str, use
     return add_swiglu(nodes, prefix, after_attn, use_smoothquant)
 
 
+def add_token_embedding(nodes: list[onnx.NodeProto], vocab: int, chunk_size: int | None, chunk_token_embedding: bool) -> str:
+    if not chunk_token_embedding:
+        nodes.append(helper.make_node("Gather", ["token_embed", "token_ids"], ["hidden0"], name="token_gather", axis=0))
+        return "hidden0"
+
+    chunks = vocab_chunks(vocab, chunk_size)
+    masked_chunks: list[str] = []
+    for index, _ in enumerate(chunks):
+        relative = f"token_chunk{index}_relative"
+        relative_safe = f"token_chunk{index}_relative_safe"
+        gathered = f"token_chunk{index}_gathered"
+        ge_start = f"token_chunk{index}_ge_start"
+        lt_end = f"token_chunk{index}_lt_end"
+        mask_bool = f"token_chunk{index}_mask_bool"
+        mask_float = f"token_chunk{index}_mask_float"
+        mask = f"token_chunk{index}_mask"
+        masked = f"token_chunk{index}_masked"
+        nodes.extend(
+            [
+                helper.make_node("Sub", ["token_ids", f"token_chunk{index}_start"], [relative], name=f"token_chunk{index}_sub_start"),
+                helper.make_node(
+                    "Greater",
+                    ["token_ids", f"token_chunk{index}_start_minus_one"],
+                    [ge_start],
+                    name=f"token_chunk{index}_ge_start",
+                ),
+                helper.make_node("Less", ["token_ids", f"token_chunk{index}_end"], [lt_end], name=f"token_chunk{index}_lt_end"),
+                helper.make_node("And", [ge_start, lt_end], [mask_bool], name=f"token_chunk{index}_mask_bool"),
+                helper.make_node("Where", [mask_bool, relative, "token_zero"], [relative_safe], name=f"token_chunk{index}_safe_index"),
+                helper.make_node(
+                    "Gather",
+                    [f"token_embed_chunk{index}", relative_safe],
+                    [gathered],
+                    name=f"token_gather_chunk{index}",
+                    axis=0,
+                ),
+                helper.make_node("Cast", [mask_bool], [mask_float], name=f"token_chunk{index}_mask_float", to=TensorProto.FLOAT),
+                helper.make_node("Reshape", [mask_float, "shape_token_mask"], [mask], name=f"token_chunk{index}_mask_reshape"),
+                helper.make_node("Mul", [gathered, mask], [masked], name=f"token_chunk{index}_apply_mask"),
+            ]
+        )
+        masked_chunks.append(masked)
+
+    hidden = masked_chunks[0]
+    for index, masked in enumerate(masked_chunks[1:], start=1):
+        out = f"hidden0_chunked_sum{index}"
+        nodes.append(helper.make_node("Add", [hidden, masked], [out], name=f"token_chunk{index}_accumulate"))
+        hidden = out
+    return hidden
+
+
 def reshape_gamma(value: np.ndarray) -> np.ndarray:
     return value.reshape(1, 1, value.shape[0])
 
@@ -313,12 +368,22 @@ def scale_linear_input(weight: np.ndarray, scale: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(linear_weight(weight) * scale.reshape(-1, 1), dtype=np.float32)
 
 
+def vocab_chunks(vocab: int, chunk_size: int | None) -> list[tuple[int, int]]:
+    if chunk_size is None or chunk_size <= 0 or chunk_size >= vocab:
+        return [(0, vocab)]
+    if chunk_size > 65535:
+        raise ValueError("--lm-head-chunk-size must be <= 65535 for the T11 verifier-limit test")
+    return [(start, min(start + chunk_size, vocab)) for start in range(0, vocab, chunk_size)]
+
+
 def build_initializers(
     reader: SafeTensorReader,
     config: dict[str, Any],
     seq: int,
     layers: int,
     smoothquant: dict[str, np.ndarray] | None = None,
+    lm_head_chunk_size: int | None = None,
+    chunk_token_embedding: bool = False,
 ) -> list[onnx.TensorProto]:
     dim = int(config["hidden_size"])
     n_heads = int(config["num_attention_heads"])
@@ -334,13 +399,13 @@ def build_initializers(
     if token_embed.shape != (vocab, dim):
         raise ValueError(f"unexpected embedding shape {token_embed.shape}, expected {(vocab, dim)}")
 
+    chunks = vocab_chunks(vocab, lm_head_chunk_size)
     values: list[onnx.TensorProto] = [
         f32_tensor("eps", np.array([eps], dtype=np.float32)),
         f32_tensor("scale_attn", np.array([1.0 / np.sqrt(head_dim)], dtype=np.float32)),
         f32_tensor("causal_mask", np.triu(np.full((1, 1, seq, seq), -10000.0, dtype=np.float32), k=1)),
         f32_tensor("rope_cos", rope_cos),
         f32_tensor("rope_sin", rope_sin),
-        f32_tensor("token_embed", token_embed),
         f32_tensor("final_rms_gamma", reshape_gamma(reader.tensor("model.norm.weight"))),
         i64_tensor("shape_q", [BATCH, seq, n_heads, head_dim]),
         i64_tensor("shape_kv", [BATCH, seq, n_kv_heads, head_dim]),
@@ -358,6 +423,29 @@ def build_initializers(
         i64_tensor("last_token_end", [seq]),
         i64_tensor("sequence_axis", [1]),
     ]
+    if chunk_token_embedding:
+        values.append(i64_tensor("shape_token_mask", [BATCH, seq, 1]))
+        values.append(i32_tensor("token_zero", [0]))
+        for index, (start, end) in enumerate(chunks):
+            values.extend(
+                [
+                    f32_tensor(f"token_embed_chunk{index}", token_embed[start:end]),
+                    i32_tensor(f"token_chunk{index}_start", [start]),
+                    i32_tensor(f"token_chunk{index}_start_minus_one", [start - 1]),
+                    i32_tensor(f"token_chunk{index}_end", [end]),
+                ]
+            )
+    else:
+        values.append(f32_tensor("token_embed", token_embed))
+    if len(chunks) > 1 and not chunk_token_embedding:
+        values.append(i64_tensor("embedding_vocab_axis", [0]))
+        for index, (start, end) in enumerate(chunks):
+            values.extend(
+                [
+                    i64_tensor(f"lm_head_chunk{index}_start", [start]),
+                    i64_tensor(f"lm_head_chunk{index}_end", [end]),
+                ]
+            )
 
     smoothquant = smoothquant or {}
     for layer in range(layers):
@@ -408,6 +496,63 @@ def build_initializers(
     return values
 
 
+def add_lm_head(
+    nodes: list[onnx.NodeProto],
+    final_last_token: str,
+    vocab: int,
+    lm_head_chunk_size: int | None,
+    output_mode: str,
+    chunk_token_embedding: bool,
+) -> list[str]:
+    chunks = vocab_chunks(vocab, lm_head_chunk_size)
+    if len(chunks) == 1:
+        nodes.append(helper.make_node("Transpose", ["token_embed"], ["lm_head"], name="tie_lm_head_transpose", perm=[1, 0]))
+        nodes.append(helper.make_node("MatMul", [final_last_token, "lm_head"], ["logits"], name="logits"))
+        return ["logits"]
+
+    logits_chunks: list[str] = []
+    for index, _ in enumerate(chunks):
+        embed_chunk = f"lm_head_embed_chunk{index}"
+        head_chunk = f"lm_head_chunk{index}"
+        logits_chunk = f"logits_chunk{index}"
+        if chunk_token_embedding:
+            embed_source = f"token_embed_chunk{index}"
+        else:
+            nodes.append(
+                helper.make_node(
+                    "Slice",
+                    [
+                        "token_embed",
+                        f"lm_head_chunk{index}_start",
+                        f"lm_head_chunk{index}_end",
+                        "embedding_vocab_axis",
+                        "slice_step_1",
+                    ],
+                    [embed_chunk],
+                    name=f"slice_lm_head_chunk{index}",
+                )
+            )
+            embed_source = embed_chunk
+        nodes.extend(
+            [
+                helper.make_node(
+                    "Transpose",
+                    [embed_source],
+                    [head_chunk],
+                    name=f"tie_lm_head_transpose_chunk{index}",
+                    perm=[1, 0],
+                ),
+                helper.make_node("MatMul", [final_last_token, head_chunk], [logits_chunk], name=f"logits_chunk{index}"),
+            ]
+        )
+        logits_chunks.append(logits_chunk)
+
+    if output_mode == "chunks":
+        return logits_chunks
+    nodes.append(helper.make_node("Concat", logits_chunks, ["logits"], name="concat_logits_chunks", axis=2))
+    return ["logits"]
+
+
 def parse_tokens(value: str, seq: int, vocab: int) -> list[int]:
     tokens = [int(part) for part in value.replace(",", " ").split()]
     if len(tokens) > seq:
@@ -446,6 +591,9 @@ def build_model(
     check_model: bool,
     smoothquant_path: Path | None,
     debug_layer_outputs: bool,
+    lm_head_chunk_size: int | None,
+    lm_head_output_mode: str,
+    chunk_token_embedding: bool,
 ) -> None:
     config = read_config(model_dir / "config.json")
     if config.get("rope_interleaved") not in (None, False):
@@ -464,6 +612,12 @@ def build_model(
         raise ValueError(f"num_attention_heads {n_heads} is not divisible by num_key_value_heads {n_kv_heads}")
     if layers <= 0 or layers > int(config["num_hidden_layers"]):
         raise ValueError(f"--max-layers must be in [1, {config['num_hidden_layers']}]")
+    if lm_head_output_mode not in {"concat", "chunks"}:
+        raise ValueError("--lm-head-output-mode must be concat or chunks")
+    if lm_head_output_mode == "chunks" and not lm_head_chunk_size:
+        raise ValueError("--lm-head-output-mode chunks requires --lm-head-chunk-size")
+    if chunk_token_embedding and not lm_head_chunk_size:
+        raise ValueError("--chunk-token-embedding requires --lm-head-chunk-size")
 
     smoothquant = load_smoothquant(smoothquant_path)
     use_smoothquant = bool(smoothquant)
@@ -472,21 +626,19 @@ def build_model(
     if tokens.shape != (BATCH, seq):
         raise ValueError(f"token tensor shape must be {(BATCH, seq)}, got {tokens.shape}")
 
-    nodes: list[onnx.NodeProto] = [
-        helper.make_node("Gather", ["token_embed", "token_ids"], ["hidden0"], name="token_gather", axis=0)
-    ]
-    hidden = "hidden0"
-    model_outputs = [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, 1, vocab])]
-    output_names = ["logits"]
+    nodes: list[onnx.NodeProto] = []
+    hidden = add_token_embedding(nodes, vocab, lm_head_chunk_size, chunk_token_embedding)
+    debug_outputs: list[onnx.ValueInfoProto] = []
+    debug_output_names: list[str] = []
     for layer in range(layers):
         hidden = add_decoder_layer(nodes, f"layer{layer}", hidden, use_smoothquant)
         if debug_layer_outputs:
-            model_outputs.append(helper.make_tensor_value_info(hidden, TensorProto.FLOAT, [BATCH, seq, dim]))
-            output_names.append(hidden)
+            debug_outputs.append(helper.make_tensor_value_info(hidden, TensorProto.FLOAT, [BATCH, seq, dim]))
+            debug_output_names.append(hidden)
     final = add_rms_norm(nodes, "final_rms", hidden, "final_rms_gamma")
     if debug_layer_outputs:
-        model_outputs.append(helper.make_tensor_value_info(final, TensorProto.FLOAT, [BATCH, seq, dim]))
-        output_names.append("final_rms_out")
+        debug_outputs.append(helper.make_tensor_value_info(final, TensorProto.FLOAT, [BATCH, seq, dim]))
+        debug_output_names.append("final_rms_out")
     nodes.append(
         helper.make_node(
             "Slice",
@@ -495,8 +647,26 @@ def build_model(
             name="slice_last_hidden",
         )
     )
-    nodes.append(helper.make_node("Transpose", ["token_embed"], ["lm_head"], name="tie_lm_head_transpose", perm=[1, 0]))
-    nodes.append(helper.make_node("MatMul", ["final_last_token", "lm_head"], ["logits"], name="logits"))
+    logit_output_names = add_lm_head(
+        nodes,
+        "final_last_token",
+        vocab,
+        lm_head_chunk_size,
+        lm_head_output_mode,
+        chunk_token_embedding,
+    )
+    chunk_ranges = vocab_chunks(vocab, lm_head_chunk_size)
+    if logit_output_names == ["logits"]:
+        logit_outputs = [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, 1, vocab])]
+        chunk_output_names = [f"logits_chunk{index}" for index, _ in enumerate(chunk_ranges)] if len(chunk_ranges) > 1 else []
+    else:
+        logit_outputs = [
+            helper.make_tensor_value_info(name, TensorProto.FLOAT, [BATCH, 1, end - start])
+            for name, (start, end) in zip(logit_output_names, chunk_ranges)
+        ]
+        chunk_output_names = logit_output_names
+    model_outputs = logit_outputs + debug_outputs
+    output_names = logit_output_names + debug_output_names
 
     reader = SafeTensorReader(model_dir / "model.safetensors")
     try:
@@ -505,7 +675,7 @@ def build_model(
             f"real_llm_fixed_w{seq}",
             [helper.make_tensor_value_info("token_ids", TensorProto.INT32, [BATCH, seq])],
             model_outputs,
-            build_initializers(reader, config, seq, layers, smoothquant),
+            build_initializers(reader, config, seq, layers, smoothquant, lm_head_chunk_size, chunk_token_embedding),
         )
     finally:
         reader.close()
@@ -564,7 +734,14 @@ def build_model(
                 "rope_theta": float(config.get("rope_theta", 10000.0)),
                 "rms_norm_eps": float(config.get("rms_norm_eps", 1e-5)),
                 "tie_word_embeddings": bool(config.get("tie_word_embeddings", False)),
-                "lm_head": "transpose(model.embed_tokens.weight)",
+                "lm_head": "chunked transpose(model.embed_tokens.weight)" if len(chunk_ranges) > 1 else "transpose(model.embed_tokens.weight)",
+                "lm_head_chunk_size": lm_head_chunk_size,
+                "lm_head_chunks": len(chunk_ranges),
+                "lm_head_chunk_ranges": chunk_ranges,
+                "lm_head_chunk_outputs": chunk_output_names,
+                "lm_head_output_mode": lm_head_output_mode,
+                "token_embedding": "chunked Gather/mask sum" if chunk_token_embedding else "Gather(token_embed)",
+                "token_embedding_chunked": chunk_token_embedding,
                 "output": "last-token logits",
                 "output_names": output_names,
                 "debug_layer_outputs": debug_layer_outputs,
@@ -602,6 +779,22 @@ def main() -> None:
         action="store_true",
         help="also expose each decoder layer output and final RMSNorm output for host cosine checks",
     )
+    parser.add_argument(
+        "--lm-head-chunk-size",
+        type=int,
+        help="tile tied lm_head into vocab chunks of this size before concatenating logits",
+    )
+    parser.add_argument(
+        "--lm-head-output-mode",
+        choices=["concat", "chunks"],
+        default="concat",
+        help="return chunked lm_head outputs directly instead of concatenating them in the graph",
+    )
+    parser.add_argument(
+        "--chunk-token-embedding",
+        action="store_true",
+        help="split the token embedding table into vocab chunks and gather from masked chunks",
+    )
     parser.add_argument("--no-check", action="store_true", help="skip onnx.checker for very large debug builds")
     args = parser.parse_args()
 
@@ -616,6 +809,9 @@ def main() -> None:
         not args.no_check,
         args.smoothquant_scales,
         args.debug_layer_outputs,
+        args.lm_head_chunk_size,
+        args.lm_head_output_mode,
+        args.chunk_token_embedding,
     )
 
 

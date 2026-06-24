@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+
+def sanitize(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
 
 
 def read_values(path: Path) -> np.ndarray:
@@ -77,13 +82,43 @@ def main() -> int:
 
     oracle = np.load(args.oracle)
     results = []
-    for index, name in enumerate(output_names):
-        host_path = args.package_dir / f"host_output_{index}.txt"
-        if not host_path.exists():
-            raise SystemExit(f"missing host output: {host_path}")
-        if name not in oracle:
-            raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
-        results.append(compare(name, read_values(host_path), np.asarray(oracle[name]), args.top_k))
+    chunk_names = info.get("lm_head_chunk_outputs") or []
+    if info.get("lm_head_output_mode") == "chunks" and chunk_names:
+        by_name = {}
+        meta_path = args.package_dir / "nbg_meta.json"
+        output_keys = []
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="ascii"))
+            output_keys = list(meta.get("Outputs", {}).keys())
+        for index, fallback_name in enumerate(output_names):
+            host_path = args.package_dir / f"host_output_{index}.txt"
+            if not host_path.exists():
+                raise SystemExit(f"missing host output: {host_path}")
+            key = output_keys[index] if index < len(output_keys) else fallback_name
+            key_sanitized = sanitize(key)
+            name = next((candidate for candidate in output_names if sanitize(candidate) in key_sanitized), fallback_name)
+            by_name[name] = read_values(host_path)
+        missing = [name for name in chunk_names if name not in by_name]
+        if missing:
+            raise SystemExit(f"missing chunk host output(s): {missing}")
+        logits = np.concatenate([by_name[name].reshape(-1) for name in chunk_names])
+        if "logits" not in oracle:
+            raise SystemExit(f"missing oracle tensor 'logits' in {args.oracle}")
+        results.append(compare("logits", logits, np.asarray(oracle["logits"]), args.top_k))
+        for name in output_names:
+            if name in chunk_names:
+                continue
+            if name not in oracle:
+                raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
+            results.append(compare(name, by_name[name], np.asarray(oracle[name]), args.top_k))
+    else:
+        for index, name in enumerate(output_names):
+            host_path = args.package_dir / f"host_output_{index}.txt"
+            if not host_path.exists():
+                raise SystemExit(f"missing host output: {host_path}")
+            if name not in oracle:
+                raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
+            results.append(compare(name, read_values(host_path), np.asarray(oracle[name]), args.top_k))
 
     payload = {
         "package_dir": str(args.package_dir),

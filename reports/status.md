@@ -1038,3 +1038,39 @@ workspace artifacts.
     or `/dev/vipcore` users were present for the run; temporary B1b NBG copies
     were removed afterward, restoring root filesystem usage from 95% to 82%.
   - Report added: `reports/b1b-benchmark-matrix.md`.
+
+- Task T11-qwen-chunked-bf16 completed at the host gates; no Orange Pi run was
+  started because no exportable, host-coherent Qwen candidate was produced.
+  - Added chunked Qwen lm_head generation to `scripts/host/make_real_llm_onnx.py`:
+    `--lm-head-chunk-size`, `--lm-head-output-mode concat|chunks`, and optional
+    token embedding chunking.
+  - Updated host comparison tooling for chunked logits:
+    `scripts/host/compare_onnxruntime_to_oracle.py` and
+    `scripts/host/compare_acuity_host_to_oracle.py`.
+  - Added packaging/helper tooling:
+    `scripts/host/package_acuity_nbg.py` and
+    `scripts/host/make_qwen2_chunked_hybrid_seed.py`.
+  - Verified no-concat chunked ONNX Runtime vs FP oracle:
+    `logs/host/t11-qwen25-w32-chunked-no-concat-onnxruntime-vs-fp.json`
+    reports logits cosine `0.9999999999967962`, top-1 match `198`, max abs
+    diff `0.000029087`.
+  - Verified BF16 ACUITY export still fails after lm_head chunking:
+    `logs/host/t11-qwen25-w32-chunked-bf16-convert.retry1.err.log` and
+    `logs/host/t11-qwen25-w32-chunked-no-concat-bf16-convert.err.log` both end
+    at `vnn_VerifyGraph` status `-3`, `Fatal model generation error: 64768`.
+  - Verified strict token-embedding chunking changes the blocker but does not
+    export: `logs/host/t11-qwen25-w32-chunked-embed-chunks-bf16-convert.err.log`
+    ends at `Check node[13] DATACONVERT fail`, `Fatal model generation error:
+    65280`.
+  - Verified ACUITY hybrid seed with BF16 lm_head plus top-8 entropy FC layers
+    can quantize and host-infer, but fails quality and export:
+    `logs/host/t11-qwen25-w32-chunked-hybrid-int16-bf16top8-host-vs-fp.json`
+    reports logits cosine `0.2540464987`, top-1 mismatch `266` vs `198`; export
+    fails in
+    `logs/host/t11-qwen25-w32-chunked-hybrid-int16-bf16top8-infer-export.err.log`
+    at `Inputs/Outputs data type not support: BFLOAT16, DFP INT16`,
+    `Check node[24] PERMUTE fail`, `Fatal model generation error: 65280`.
+  - Restored the ACUITY model directory's current int16 quantize file to the
+    base int16 table after saving the hybrid table under
+    `work/generated/qwen25_05b_w32_chunked_hybrid_seed/`.
+  - Report added: `reports/t11-qwen-chunked-bf16.md`.

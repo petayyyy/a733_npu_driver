@@ -75,10 +75,27 @@ def main() -> int:
     oracle = np.load(args.oracle)
 
     results = []
-    for name, actual in zip(output_names, outputs):
-        if name not in oracle:
-            raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
-        results.append(compare(name, np.asarray(actual), np.asarray(oracle[name]), args.top_k))
+    chunk_names = info.get("lm_head_chunk_outputs") or []
+    if info.get("lm_head_output_mode") == "chunks" and chunk_names:
+        by_name = dict(zip(output_names, outputs))
+        missing = [name for name in chunk_names if name not in by_name]
+        if missing:
+            raise SystemExit(f"missing chunk output(s) from ONNX Runtime: {missing}")
+        logits = np.concatenate([np.asarray(by_name[name]) for name in chunk_names], axis=-1)
+        if "logits" not in oracle:
+            raise SystemExit(f"missing oracle tensor 'logits' in {args.oracle}")
+        results.append(compare("logits", logits, np.asarray(oracle["logits"]), args.top_k))
+        for name, actual in zip(output_names, outputs):
+            if name in chunk_names:
+                continue
+            if name not in oracle:
+                raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
+            results.append(compare(name, np.asarray(actual), np.asarray(oracle[name]), args.top_k))
+    else:
+        for name, actual in zip(output_names, outputs):
+            if name not in oracle:
+                raise SystemExit(f"missing oracle tensor {name!r} in {args.oracle}")
+            results.append(compare(name, np.asarray(actual), np.asarray(oracle[name]), args.top_k))
 
     payload = {
         "onnx": str(args.onnx),
