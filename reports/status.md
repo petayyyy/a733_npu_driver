@@ -785,3 +785,39 @@ workspace artifacts.
     check. CPU work remains tokenization, fixed-window orchestration,
     argmax/sampling, detokenization, and logging.
 - Report added: `reports/t10b-orangepi-smollm2.md`.
+
+- Task B1-benchmark-matrix started.
+  - Verified B1 scope from `promts/b1.md`: SmolLM2 135M/360M/1.7B at
+    windows `32`, `64`, `128`, and `256`, with ONNX Runtime and ACUITY int16
+    host gates before Orange Pi board runs.
+  - Selected one fixed comparison prompt for the whole matrix:
+    `The capital of France is`, rendered through the SmolLM2 chat template.
+    The full prompt has `35` token IDs; each fixed window uses the rightmost
+    `min(W, 35)` tokens and zero left-padding where needed.
+  - Verified Docker resource arguments are being used for B1 container work:
+    `--cpus 10 --memory 24g`.
+  - Verified B1-specific SmolLM2-135M-Instruct `W=32` ONNX generation:
+    `work/generated/b1_smollm2_135m_w32/real_llm.onnx`.
+  - Verified ONNX Runtime vs FP oracle for that graph passes:
+    `logs/host/b1-smollm2-135m-w32-onnxruntime-vs-fp.json` reports logits
+    cosine `1.000000000` and top-1 match `504`.
+  - Verified ACUITY int16 conversion/export for the same graph produced an NBG
+    package at `work/model-packages/b1_smollm2_135m_w32_int16/int16/` with
+    `network_binary.nb` size `280,882,632` bytes and export log
+    `Error(0),Warning(0)`.
+  - Verified ACUITY int16 `pegasus inference` host output fails the literal B1
+    host gate for that same sample:
+    `logs/host/b1-smollm2-135m-w32-int16-host-vs-fp.json` reports logits
+    cosine `0.777693043`, top-1 mismatch `1672` vs FP oracle `504`.
+  - Verified a raw-prompt 135M/W32 probe also fails ACUITY host cosine
+    (`0.749492804`) despite T10b having already verified coherent 135M/W32
+    text on the Orange Pi. Treat `pegasus inference` as a method risk for
+    SmolLM2 int16 and keep reporting it honestly instead of hiding it.
+  - Verified Orange Pi was not idle before B1 board work: another agent had
+    `monitor_command.py ... b4-qwen-cpu-baseline ... llama-bench` running as
+    user `orangepi`. `/dev/vipcore` had no users, but no B1 board run was
+    started to avoid interfering with the other agent.
+  - Added initial B1 report skeleton:
+    `reports/b1-benchmark-matrix.md`.
+  - Added downloader helper for missing public Hugging Face checkpoints:
+    `scripts/host/download_b1_smollm2_models.py`.
