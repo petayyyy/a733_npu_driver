@@ -871,6 +871,12 @@ workspace artifacts.
     and exited `139`, leaving a `0` byte `network_binary.nb`. The W=32 cell
     was not run on the board under the literal host-gate rule. Remaining 1.7B
     W=64/W=128/W=256 ACUITY int16 host gates are still pending.
+  - Verified SmolLM2-1.7B-Instruct W=64 ACUITY int16 host gate fails:
+    cosine `0.285665032`, top-1 `198` vs oracle `504`. ACUITY import,
+    quantize, and host inference completed; export again left a `0` byte
+    `network_binary.nb`, so no valid NBG package was produced and no board run
+    was started. Remaining 1.7B W=128/W=256 ACUITY int16 host gates are still
+    pending.
 
 - Task B4-qwen-cpu-baseline completed as a CPU diagnostic fallback baseline,
   not an NPU project gate.
