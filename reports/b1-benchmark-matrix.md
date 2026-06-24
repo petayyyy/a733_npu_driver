@@ -34,9 +34,9 @@ tokens and left-pads with zero when `W` is larger than the prompt. This matches
 | SmolLM2-135M-Instruct | 128 | verified cosine `1.000000000`, top-1 `198` match | verified cosine `-0.590862935`, top-1 mismatch `407` vs `198` | fail by `>=0.99` rule | not run by literal host-gate rule | 286,894,144 bytes |
 | SmolLM2-135M-Instruct | 256 | verified cosine `1.000000000`, top-1 `198` match | verified cosine `-0.784897858`, top-1 mismatch `46161` vs `198` | fail by `>=0.99` rule | not run by literal host-gate rule | 337,090,160 bytes |
 | SmolLM2-360M-Instruct | 32 | verified cosine `1.000000000`, top-1 `57` match | verified cosine `0.131091912`, top-1 mismatch `99` vs `57` | fail by `>=0.99` rule | not run by literal host-gate rule | 672,715,688 bytes |
-| SmolLM2-360M-Instruct | 64 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
-| SmolLM2-360M-Instruct | 128 | verified cosine `1.000000000`, top-1 `198` match | pending | pending | not run yet | pending |
-| SmolLM2-360M-Instruct | 256 | verified cosine `0.999999995`, top-1 `198` match | pending | pending | not run yet | pending |
+| SmolLM2-360M-Instruct | 64 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.607897325`, top-1 mismatch `6643` vs `504` | fail by `>=0.99` rule | not run by literal host-gate rule | 674,536,104 bytes |
+| SmolLM2-360M-Instruct | 128 | verified cosine `1.000000000`, top-1 `198` match | verified cosine `0.476642772`, top-1 `198` match | fail by `>=0.99` rule | not run by literal host-gate rule | 693,294,624 bytes |
+| SmolLM2-360M-Instruct | 256 | verified cosine `0.999999995`, top-1 `198` match | verified cosine `0.287806907`, top-1 mismatch `36616` vs `198` | fail by `>=0.99` rule | not run by literal host-gate rule | 708,452,104 bytes |
 | SmolLM2-1.7B-Instruct | 32 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
 | SmolLM2-1.7B-Instruct | 64 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
 | SmolLM2-1.7B-Instruct | 128 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |

@@ -854,7 +854,16 @@ workspace artifacts.
       `337,090,160` bytes.
   - Verified SmolLM2-360M-Instruct W=32 ACUITY int16 host gate fails:
     cosine `0.131091912`, top-1 `99` vs oracle `57`, NBG `672,715,688`
-    bytes. Remaining 360M and 1.7B ACUITY int16 host gates are still pending.
+    bytes.
+  - Verified SmolLM2-360M-Instruct W=64/W=128 ACUITY int16 host gates fail
+    the literal B1 gate and therefore were not run on the board:
+    - W=64: cosine `0.607897325`, top-1 `6643` vs oracle `504`, NBG
+      `674,536,104` bytes.
+    - W=128: cosine `0.476642772`, top-1 `198` match, NBG
+      `693,294,624` bytes.
+    - W=256: cosine `0.287806907`, top-1 `36616` vs oracle `198`, NBG
+      `708,452,104` bytes.
+    Remaining 1.7B ACUITY int16 host gates are still pending.
 
 - Task B4-qwen-cpu-baseline completed as a CPU diagnostic fallback baseline,
   not an NPU project gate.
