@@ -863,7 +863,14 @@ workspace artifacts.
       `693,294,624` bytes.
     - W=256: cosine `0.287806907`, top-1 `36616` vs oracle `198`, NBG
       `708,452,104` bytes.
-    Remaining 1.7B ACUITY int16 host gates are still pending.
+  - Verified SmolLM2-1.7B-Instruct W=32 ACUITY int16 host gate fails:
+    cosine `0.268220295`, top-1 `31532` vs oracle `504`.
+    ACUITY import, quantize, and host inference completed, but NBG export
+    failed at `gen_nbg`: manual final-stage retry emitted VX node/tensor
+    creation failures (`Create view tensor failed`, `Create VX tensor failed`)
+    and exited `139`, leaving a `0` byte `network_binary.nb`. The W=32 cell
+    was not run on the board under the literal host-gate rule. Remaining 1.7B
+    W=64/W=128/W=256 ACUITY int16 host gates are still pending.
 
 - Task B4-qwen-cpu-baseline completed as a CPU diagnostic fallback baseline,
   not an NPU project gate.
