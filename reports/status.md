@@ -821,3 +821,19 @@ workspace artifacts.
     `reports/b1-benchmark-matrix.md`.
   - Added downloader helper for missing public Hugging Face checkpoints:
     `scripts/host/download_b1_smollm2_models.py`.
+  - Verified missing public checkpoint downloads for B1:
+    `SmolLM2-360M-Instruct` is unsharded at `723,674,912` bytes and
+    `SmolLM2-1.7B-Instruct` is unsharded at `3,422,777,952` bytes.
+  - Added ONNX external-data support to `scripts/host/make_real_llm_onnx.py`
+    and sidecar copying to `scripts/host/convert_onnx_to_nbg.sh`; this is
+    required for 1.7B because the FP32 initializer payload is about
+    `6,846,116,120` bytes.
+  - Added `scripts/host/run-b1-cheap-gates.ps1` and verified all `12`
+    model/window ONNX Runtime gates against the FP oracle:
+    - SmolLM2-135M W=32/64/128/256: cosine `1.000000000`, top-1 match.
+    - SmolLM2-360M W=32/64/128: cosine `1.000000000`, top-1 match; W=256
+      cosine `0.999999995`, top-1 match.
+    - SmolLM2-1.7B W=32/64/128/256: cosine `1.000000000`, top-1 match.
+  - Updated `reports/b1-benchmark-matrix.md` with all ONNX Runtime gate rows;
+    ACUITY int16 host gates and board measurements remain pending except for
+    the already recorded 135M/W32 host-sim failure.

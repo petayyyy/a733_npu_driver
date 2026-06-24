@@ -190,6 +190,9 @@ fi
 rm -rf "$MODEL_DIR"
 mkdir -p "$MODEL_DIR"
 cp "$ONNX_ABS" "$MODEL_DIR/$NAME.onnx"
+if [ -f "$ONNX_ABS.data" ]; then
+    cp "$ONNX_ABS.data" "$MODEL_DIR/$(basename -- "$ONNX_ABS").data"
+fi
 cp "$DATASET_ABS" "$MODEL_DIR/dataset.txt"
 copy_dataset_payloads "$DATASET_ABS" "$MODEL_DIR"
 if [ -f "$(dirname -- "$DATASET_ABS")/tokens.txt" ]; then

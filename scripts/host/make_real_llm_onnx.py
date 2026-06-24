@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import struct
 from typing import Any
@@ -426,6 +427,16 @@ def default_tokens(config: dict[str, Any], seq: int) -> list[int]:
     return ([0] * max(0, seq - len(seed))) + seed[-seq:]
 
 
+def initializer_bytes(model: onnx.ModelProto) -> int:
+    total = 0
+    for tensor in model.graph.initializer:
+        if tensor.raw_data:
+            total += len(tensor.raw_data)
+        else:
+            total += len(tensor.SerializeToString())
+    return total
+
+
 def build_model(
     model_dir: Path,
     output_dir: Path,
@@ -509,7 +520,25 @@ def build_model(
         onnx.checker.check_model(model)
 
     onnx_path = output_dir / "real_llm.onnx"
-    onnx.save(model, onnx_path)
+    init_bytes = initializer_bytes(model)
+    external_data = None
+    if init_bytes >= 1900 * 1024 * 1024:
+        external_data = "real_llm.onnx.data"
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(output_dir)
+            onnx.save_model(
+                model,
+                onnx_path.name,
+                save_as_external_data=True,
+                all_tensors_to_one_file=True,
+                location=external_data,
+                size_threshold=1024,
+            )
+        finally:
+            os.chdir(old_cwd)
+    else:
+        onnx.save(model, onnx_path)
     np.save(output_dir / "token_ids.npy", tokens)
     (output_dir / "tokens.txt").write_text(
         " ".join(str(int(value)) for value in tokens.reshape(-1)) + "\n",
@@ -541,6 +570,8 @@ def build_model(
                 "debug_layer_outputs": debug_layer_outputs,
                 "smoothquant_scales": str(smoothquant_path) if smoothquant_path else None,
                 "onnx_path": str(onnx_path),
+                "initializer_bytes": init_bytes,
+                "external_data": external_data,
             },
             indent=2,
             sort_keys=True,
