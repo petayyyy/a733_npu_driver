@@ -194,6 +194,11 @@ if [ -f "$ONNX_ABS.data" ]; then
     cp "$ONNX_ABS.data" "$MODEL_DIR/$(basename -- "$ONNX_ABS").data"
 fi
 cp "$DATASET_ABS" "$MODEL_DIR/dataset.txt"
+for extra_dataset in "$(dirname -- "$DATASET_ABS")"/dataset[0-9]*.txt; do
+    if [ -f "$extra_dataset" ]; then
+        cp "$extra_dataset" "$MODEL_DIR/$(basename -- "$extra_dataset")"
+    fi
+done
 copy_dataset_payloads "$DATASET_ABS" "$MODEL_DIR"
 if [ -f "$(dirname -- "$DATASET_ABS")/tokens.txt" ]; then
     cp "$(dirname -- "$DATASET_ABS")/tokens.txt" "$MODEL_DIR/tokens.txt"

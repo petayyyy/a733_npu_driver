@@ -966,3 +966,28 @@ workspace artifacts.
   - Docker was not used for B2 because the working SmolLM2 int16 NBG from T10b
     was already deployed; no ACUITY rebuild was required.
   - Report added: `reports/b2-chat-shell.md`.
+
+- Task B3-vlm-orangepi started and is blocked before Orange Pi execution.
+  - Verified host-side B3 MobileCLIP-S0 vision package regeneration with Docker
+    resources `--cpus 10 --memory 24g`:
+    `work/model-packages/b3_mobileclip_s0_vision_int16/int16/network_binary.nb`,
+    size `19,376,840` bytes; ACUITY export `Error(0),Warning(0)`;
+    input `pixel_values` int16 `1x3x256x256`, output `1x512`.
+  - Verified host-side B3 tiny VLM bridge package regeneration using the B3
+    MobileCLIP host embedding as `image_embed` and tokens `1 5 9 2`:
+    `work/model-packages/b3_tiny_vlm_bridge_int16/int16/network_binary.nb`,
+    size `94,400` bytes; ACUITY export `Error(0),Warning(0)`; last-token host
+    top-1 token `12`.
+  - Fixed the host ACUITY wrapper for multi-input separated datasets by copying
+    sibling `dataset[0-9]*.txt` files before quantization.
+  - Added host helpers:
+    `scripts/host/make_mobileclip_input.py` and
+    `scripts/host/pack_nbg_input_from_text.py`.
+  - Verified Orange Pi SSH is currently not usable: OpenSSH to
+    `orangepi@192.168.31.225:22` returns `Permission denied` at connect time,
+    and a Docker `/dev/tcp` scan reports checked ports `22`, `2222`, `2200`,
+    `80`, `443`, `8080`, `8888`, and `5900` closed.
+  - No B3 board idle check, upload, NPU run, latency/RSS measurement, or
+    output comparison was performed because the board execution channel is
+    blocked.
+  - Report added: `reports/b3-vlm-orangepi.md`.
