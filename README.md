@@ -28,7 +28,10 @@ orchestration, validation, and other non-inference support work.
   as an NBG on the NPU. The per-token `vpm_run` relaunch path has now been
   replaced for the tiny LM by a persistent VIPLite C runner that loads the NBG
   once and reproduces the same generated token sequence with lower stable
-  per-token wall time.
+  per-token wall time. On the Orange Pi Zero 3W, the same persistent-runner
+  pattern now drives `SmolLM2-135M-Instruct` W=32 int16 through an interactive
+  chat shell that streams tokens at about 21 tok/s while keeping model-layer
+  compute on the NPU.
   The previous CPU llama.cpp decoder result is retained only as a diagnostic
   baseline and is not a project deliverable.
 
@@ -47,6 +50,7 @@ scripts/
     a733-g0-g1-smoke.sh    Board diagnostics and NPU smoke-test collector
     build-ai-sdk.sh        Build helper for an already cloned ai-sdk tree
     build-npu-lm-runner.sh Build the persistent tiny LM VIPLite runner
+    chat_shell.py          Orange Pi interactive SmolLM2 NPU chat shell
     npu_lm_runner.c        Persistent tiny LM VIPLite runner source
     build-llama-cpp.sh     Historical CPU baseline helper, not a deliverable
     run-llama-decode.sh    Historical CPU baseline helper, not a deliverable
@@ -129,6 +133,40 @@ A733_NPU_RUN_CMD='cd /home/radxa/yolo_shm && export LD_LIBRARY_PATH=/home/radxa/
 
 The script writes logs under `logs/board/<host>-<timestamp>/` and summarizes
 whether G0/G1 checks are satisfied.
+
+## Orange Pi NPU Chat Shell
+
+The current human-facing SmolLM2 chat entry point on the Orange Pi Zero 3W is:
+
+```bash
+cd /home/orangepi/a733_npu_driver
+
+python3 scripts/board/chat_shell.py \
+  --model /home/orangepi/a733_npu_driver/models/smollm2_135m_w32_int16/network_binary.nb \
+  --tokenizer /home/orangepi/a733_npu_driver/work/models/smollm2-135m-instruct \
+  --runner /home/orangepi/a733_npu_driver/build/npu_lm_runner \
+  --vip-lib /home/orangepi/lib \
+  --window 32 \
+  --max-new-tokens 32 \
+  --greedy
+```
+
+Build or rebuild the runner on that image with:
+
+```bash
+cd /home/orangepi/a733_npu_driver
+
+bash scripts/board/build-npu-lm-runner.sh \
+  --vip-inc /home/orangepi/yolo_shm \
+  --vip-lib /home/orangepi/lib \
+  --out /home/orangepi/a733_npu_driver/build/npu_lm_runner
+```
+
+The shell prints the NBG size, `/dev/vipcore` status, `cid=0x1000003b`,
+`nbg_loaded_once=1`, the live fixed-window counter, and tok/s after each reply.
+Use `/reset` to clear the conversation window and `/exit` to quit. The fixed
+window is honest: once the rendered chat exceeds `--window`, only the last
+`W` tokens are submitted to the NPU graph.
 
 ## SSH Stage Inputs
 

@@ -5,11 +5,13 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define MAX_PROMPT_TOKENS 256
 #define MAX_TOPK 5
@@ -27,6 +29,9 @@ typedef struct {
     int steps;
     int seq_len;
     int vocab;
+    int protocol;
+    float temperature;
+    unsigned int seed;
     uint32_t device_index;
     int32_t core_index;
     uint32_t timeout_ms;
@@ -65,6 +70,9 @@ static void usage(const char *argv0)
             "  --steps N         Number of generated tokens (default: 8)\n"
             "  --seq-len N       Fixed input window length (default: 4)\n"
             "  --vocab N         Vocabulary size for last-position argmax (default: 16)\n"
+            "  --protocol        Keep the NBG loaded and serve RUN commands over stdin/stdout\n"
+            "  --temperature F   Sample with temperature F; <=0 means greedy argmax (default: 0)\n"
+            "  --seed N          PRNG seed for temperature sampling (default: 1)\n"
             "  --device N        VIP device index (default: 0)\n"
             "  --core N          VIP core index; -1 keeps SDK default (default: -1)\n"
             "  --timeout-ms N    VIP network timeout in ms (default: 0)\n",
@@ -95,6 +103,20 @@ static int parse_u32(const char *text, uint32_t *out)
     return 0;
 }
 
+static int parse_float(const char *text, float *out)
+{
+    char *end = NULL;
+    double value;
+
+    errno = 0;
+    value = strtod(text, &end);
+    if (errno != 0 || end == text || *end != '\0' || !isfinite(value)) {
+        return -1;
+    }
+    *out = (float)value;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, runner_args_t *args)
 {
     int i;
@@ -105,6 +127,9 @@ static int parse_args(int argc, char **argv, runner_args_t *args)
     args->steps = 8;
     args->seq_len = 4;
     args->vocab = 16;
+    args->protocol = 0;
+    args->temperature = 0.0f;
+    args->seed = 1U;
     args->device_index = 0;
     args->core_index = -1;
     args->timeout_ms = 0;
@@ -128,6 +153,18 @@ static int parse_args(int argc, char **argv, runner_args_t *args)
             if (parse_int(argv[++i], &args->vocab) != 0) {
                 return -1;
             }
+        } else if (strcmp(argv[i], "--protocol") == 0) {
+            args->protocol = 1;
+        } else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) {
+            if (parse_float(argv[++i], &args->temperature) != 0) {
+                return -1;
+            }
+        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            uint32_t seed = 0;
+            if (parse_u32(argv[++i], &seed) != 0) {
+                return -1;
+            }
+            args->seed = seed;
         } else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
             if (parse_u32(argv[++i], &args->device_index) != 0) {
                 return -1;
@@ -153,7 +190,11 @@ static int parse_args(int argc, char **argv, runner_args_t *args)
     if (args->steps < 0 || args->seq_len <= 0 || args->vocab <= 0) {
         return -1;
     }
-    if (args->seq_len > MAX_PROMPT_TOKENS || args->steps > MAX_PROMPT_TOKENS - args->seq_len) {
+    if (args->seq_len > MAX_PROMPT_TOKENS) {
+        fprintf(stderr, "seq-len must be <= %d\n", MAX_PROMPT_TOKENS);
+        return -1;
+    }
+    if (!args->protocol && args->steps > MAX_PROMPT_TOKENS - args->seq_len) {
         fprintf(stderr, "seq-len + steps must be <= %d\n", MAX_PROMPT_TOKENS);
         return -1;
     }
@@ -584,13 +625,19 @@ static int write_window(runner_t *runner, const int *window, int seq_len)
     return 0;
 }
 
-static int read_next_token(runner_t *runner, int vocab, char *top5, size_t top5_size)
+static int read_next_token(
+    runner_t *runner,
+    int vocab,
+    float temperature,
+    char *top5,
+    size_t top5_size)
 {
     uint8_t *mapped = NULL;
     uint32_t stride = type_bytes(runner->output_param.data_format);
     uint32_t base = runner->output_elements - (uint32_t)vocab;
     float best = 0.0f;
     int best_idx = 0;
+    int selected_idx = 0;
     int top_idx[MAX_TOPK];
     float top_val[MAX_TOPK];
     int i;
@@ -637,6 +684,38 @@ static int read_next_token(runner_t *runner, int vocab, char *top5, size_t top5_
         }
     }
 
+    selected_idx = best_idx;
+    if (temperature > 0.0f) {
+        double sum = 0.0;
+        double draw;
+        double cumulative = 0.0;
+
+        for (i = 0; i < vocab; i++) {
+            float value = decode_value(mapped + ((base + (uint32_t)i) * stride),
+                                       &runner->output_param);
+            double weight = exp(((double)value - (double)best) / (double)temperature);
+            if (isfinite(weight) && weight > 0.0) {
+                sum += weight;
+            }
+        }
+
+        if (isfinite(sum) && sum > 0.0) {
+            draw = ((double)rand() / ((double)RAND_MAX + 1.0)) * sum;
+            for (i = 0; i < vocab; i++) {
+                float value = decode_value(mapped + ((base + (uint32_t)i) * stride),
+                                           &runner->output_param);
+                double weight = exp(((double)value - (double)best) / (double)temperature);
+                if (isfinite(weight) && weight > 0.0) {
+                    cumulative += weight;
+                    if (cumulative >= draw) {
+                        selected_idx = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     vip_unmap_buffer(runner->output);
 
     for (k = 0; k < MAX_TOPK && k < vocab; k++) {
@@ -651,7 +730,46 @@ static int read_next_token(runner_t *runner, int vocab, char *top5, size_t top5_
         }
     }
 
-    return best_idx;
+    return selected_idx;
+}
+
+static int run_window_once(
+    runner_t *runner,
+    const runner_args_t *args,
+    const int *window,
+    int *next_token,
+    char *top5,
+    size_t top5_size,
+    uint32_t *profile_us,
+    uint32_t *cycle,
+    uint64_t *wall_us)
+{
+    uint64_t t0;
+    vip_status_e status;
+    vip_inference_profile_t profile;
+
+    t0 = now_us();
+    if (write_window(runner, window, args->seq_len) != 0) {
+        return -1;
+    }
+
+    status = vip_run_network(runner->network);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "vip_run_network failed: %d\n", status);
+        return -1;
+    }
+
+    memset(&profile, 0, sizeof(profile));
+    vip_query_network(runner->network, VIP_NETWORK_PROP_PROFILING, &profile);
+    *next_token = read_next_token(runner, args->vocab, args->temperature, top5, top5_size);
+    if (*next_token < 0) {
+        return -1;
+    }
+
+    *wall_us = now_us() - t0;
+    *profile_us = profile.inference_time;
+    *cycle = profile.total_cycle;
+    return 0;
 }
 
 static int run_decode(runner_t *runner, const runner_args_t *args, int *tokens, int token_count)
@@ -670,41 +788,26 @@ static int run_decode(runner_t *runner, const runner_args_t *args, int *tokens, 
         int start = token_count - args->seq_len;
         int next_token;
         int i;
-        uint64_t t0;
         uint64_t wall_us;
-        vip_status_e status;
-        vip_inference_profile_t profile;
+        uint32_t profile_us;
+        uint32_t cycle;
         char top5[256];
 
         for (i = 0; i < args->seq_len; i++) {
             window[i] = tokens[start + i];
         }
 
-        t0 = now_us();
-        if (write_window(runner, window, args->seq_len) != 0) {
+        if (run_window_once(runner, args, window, &next_token, top5, sizeof(top5),
+                            &profile_us, &cycle, &wall_us) != 0) {
             return -1;
         }
-
-        status = vip_run_network(runner->network);
-        if (status != VIP_SUCCESS) {
-            fprintf(stderr, "vip_run_network failed at step %d: %d\n", step, status);
-            return -1;
-        }
-
-        memset(&profile, 0, sizeof(profile));
-        vip_query_network(runner->network, VIP_NETWORK_PROP_PROFILING, &profile);
-        next_token = read_next_token(runner, args->vocab, top5, sizeof(top5));
-        if (next_token < 0) {
-            return -1;
-        }
-        wall_us = now_us() - t0;
         total_wall_us += wall_us;
-        total_profile_us += profile.inference_time;
+        total_profile_us += profile_us;
 
         printf("step=%d window=", step);
         print_window(window, 0, args->seq_len);
         printf(" next=%d top5=%s profile_us=%u cycle=%u wall_us=%" PRIu64 "\n",
-               next_token, top5, profile.inference_time, profile.total_cycle, wall_us);
+               next_token, top5, profile_us, cycle, wall_us);
 
         tokens[token_count++] = next_token;
     }
@@ -719,6 +822,89 @@ static int run_decode(runner_t *runner, const runner_args_t *args, int *tokens, 
         printf("mean_profile_us=%.3f\n", mean_profile_us);
         printf("mean_tok_s=%.3f\n", 1000000.0 / mean_wall_us);
     }
+    return 0;
+}
+
+static int parse_protocol_window(const char *text, int vocab, int seq_len, int *window)
+{
+    char *copy = NULL;
+    char *save = NULL;
+    char *part = NULL;
+    int n = 0;
+
+    copy = malloc(strlen(text) + 1);
+    if (copy == NULL) {
+        return -1;
+    }
+    strcpy(copy, text);
+
+    for (part = strtok_r(copy, " ,\t\r\n", &save);
+         part != NULL;
+         part = strtok_r(NULL, " ,\t\r\n", &save)) {
+        int token = 0;
+        if (n >= seq_len || parse_int(part, &token) != 0 || token < 0 || token >= vocab) {
+            free(copy);
+            return -1;
+        }
+        window[n++] = token;
+    }
+
+    free(copy);
+    return n == seq_len ? 0 : -1;
+}
+
+static int run_protocol(runner_t *runner, const runner_args_t *args)
+{
+    char line[8192];
+
+    printf("protocol=stdio\n");
+    printf("nbg_loaded_once=1\n");
+    printf("READY seq_len=%d vocab=%d temperature=%.6g\n",
+           args->seq_len, args->vocab, args->temperature);
+    fflush(stdout);
+
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        char *command = line;
+        while (*command == ' ' || *command == '\t') {
+            command++;
+        }
+
+        if (strncmp(command, "QUIT", 4) == 0 || strncmp(command, "EXIT", 4) == 0) {
+            printf("BYE\n");
+            fflush(stdout);
+            return 0;
+        }
+        if (strncmp(command, "RUN", 3) == 0 &&
+            (command[3] == '\0' || command[3] == ' ' || command[3] == '\t')) {
+            int window[MAX_PROMPT_TOKENS];
+            int next_token = -1;
+            uint32_t profile_us = 0;
+            uint32_t cycle = 0;
+            uint64_t wall_us = 0;
+            char top5[256];
+            char *payload = command + 3;
+
+            if (parse_protocol_window(payload, args->vocab, args->seq_len, window) != 0) {
+                printf("ERROR invalid_window expected=%d\n", args->seq_len);
+                fflush(stdout);
+                continue;
+            }
+            if (run_window_once(runner, args, window, &next_token, top5, sizeof(top5),
+                                &profile_us, &cycle, &wall_us) != 0) {
+                printf("ERROR run_failed\n");
+                fflush(stdout);
+                return -1;
+            }
+            printf("TOKEN id=%d profile_us=%u cycle=%u wall_us=%" PRIu64 " top5=%s\n",
+                   next_token, profile_us, cycle, wall_us, top5);
+            fflush(stdout);
+            continue;
+        }
+
+        printf("ERROR unknown_command\n");
+        fflush(stdout);
+    }
+
     return 0;
 }
 
@@ -750,20 +936,24 @@ int main(int argc, char **argv)
         nbg_path = default_nbg;
     }
 
-    if (parse_prompt(args.prompt, args.vocab, tokens, &prompt_count) != 0) {
-        fprintf(stderr, "invalid prompt: %s\n", args.prompt);
-        return 2;
-    }
-    if (prompt_count > args.seq_len) {
-        fprintf(stderr, "prompt has %d tokens, seq-len is %d\n", prompt_count, args.seq_len);
-        return 2;
-    }
+    if (!args.protocol) {
+        if (parse_prompt(args.prompt, args.vocab, tokens, &prompt_count) != 0) {
+            fprintf(stderr, "invalid prompt: %s\n", args.prompt);
+            return 2;
+        }
+        if (prompt_count > args.seq_len) {
+            fprintf(stderr, "prompt has %d tokens, seq-len is %d\n", prompt_count, args.seq_len);
+            return 2;
+        }
 
-    token_count = args.seq_len;
-    memmove(tokens + (args.seq_len - prompt_count), tokens, (size_t)prompt_count * sizeof(tokens[0]));
-    for (i = 0; i < args.seq_len - prompt_count; i++) {
-        tokens[i] = 0;
+        token_count = args.seq_len;
+        memmove(tokens + (args.seq_len - prompt_count), tokens,
+                (size_t)prompt_count * sizeof(tokens[0]));
+        for (i = 0; i < args.seq_len - prompt_count; i++) {
+            tokens[i] = 0;
+        }
     }
+    srand(args.seed);
 
     version = vip_get_version();
     printf("vip_lite_driver_version=0x%08x\n", version);
@@ -786,7 +976,11 @@ int main(int argc, char **argv)
     if (runner_create(&runner, &args, nbg_path) != 0) {
         goto out;
     }
-    if (run_decode(&runner, &args, tokens, token_count) != 0) {
+    if (args.protocol) {
+        if (run_protocol(&runner, &args) != 0) {
+            goto out_destroy_runner;
+        }
+    } else if (run_decode(&runner, &args, tokens, token_count) != 0) {
         goto out_destroy_runner;
     }
 

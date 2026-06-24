@@ -923,3 +923,38 @@ workspace artifacts.
     For ROS2-running mode, keep using the NPU SmolLM2 path so the A76 cores
     stay free.
   - Report added: `reports/b4-qwen-cpu-baseline.md`.
+
+- Task B2-chat-shell completed for the working Orange Pi SmolLM2 NPU path.
+  - Verified the Orange Pi Zero 3W at `192.168.31.225` was idle before each
+    B2 NPU run: `/dev/vipcore` had no users, and no unrelated
+    `npu_lm_runner`, `vpm_run`, `llama`, `monitor_command.py`,
+    `chat_shell.py`, `cmake`, or `ninja` jobs were active.
+  - Added `--protocol` to `scripts/board/npu_lm_runner.c`: the C runner now
+    loads/prepares the NBG once, then serves repeated `RUN <window token ids>`
+    commands over stdin/stdout and returns one streamed token plus
+    `profile_us`, `cycle`, `wall_us`, and top-5 logits.
+  - Added `scripts/board/chat_shell.py`: a Python REPL using the SmolLM2
+    ChatML-style prompt, the model HF `tokenizer.json`, fixed-window sliding,
+    streamed token display, live `used/W` counter, `/reset`, `--model`,
+    `--tokenizer`, `--window`, `--max-new-tokens`, `--temperature`, and
+    `--greedy`.
+  - Verified runner rebuild on Orange Pi with:
+    `bash scripts/board/build-npu-lm-runner.sh --vip-inc /home/orangepi/yolo_shm --vip-lib /home/orangepi/lib --out /home/orangepi/a733_npu_driver/build/npu_lm_runner`.
+  - Verified final scripted multi-turn REPL on the deployed
+    `SmolLM2-135M-Instruct` W=32 int16 NBG:
+    `/home/orangepi/a733_npu_driver/models/smollm2_135m_w32_int16/network_binary.nb`,
+    size `280,882,632` bytes.
+  - Verified final log:
+    `/home/orangepi/a733_npu_driver/logs/board/b2-chat-shell-20260624T073253Z-final.log`.
+    Startup recorded `vip_init=OK`, `cid=0x1000003b`,
+    `create_network_us=147590`, `prepare_network_us=6594`,
+    `nbg_loaded_once=1`, `READY seq_len=32 vocab=49152 temperature=0`.
+  - Verified three streamed replies in the final log with fixed-window notices
+    and live `[window 32/32]` counters. Reply throughput was `20.970`,
+    `20.919`, and `20.999 tok/s`; `/reset` cleared the window between the
+    second and third turns.
+  - Verified after validation that `/dev/vipcore` had no users and no
+    `npu_lm_runner` or `chat_shell.py` process remained.
+  - Docker was not used for B2 because the working SmolLM2 int16 NBG from T10b
+    was already deployed; no ACUITY rebuild was required.
+  - Report added: `reports/b2-chat-shell.md`.
