@@ -59,7 +59,11 @@ deliverable for this project.
 5. Done: validated a fixed-window tiny LM decode loop where CPU only updates
    token IDs and postprocesses logits while every model-layer forward pass
    runs on NPU.
-6. Replace per-token `vpm_run` launches with a persistent VIPLite/awnn runner,
-   then extend the same loop pattern to the VLM path.
-7. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
+6. Done for the LM path: persistent VIPLite runners load NBGs once and drive
+   fixed-window decode loops with CPU limited to tokenization, orchestration,
+   sampling, detokenization, and logging. This is now verified both for the
+   tiny LM path and for SmolLM2-135M-Instruct W=32 int16 on the Orange Pi Zero
+   3W.
+7. Continue extending the same persistent-loop pattern to the VLM path.
+8. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
    transformer operations or static decoder graphs.

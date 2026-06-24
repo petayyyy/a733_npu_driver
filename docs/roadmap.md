@@ -245,6 +245,13 @@ Gate G5:
 - Userspace apps are rebuilt against the target image.
 - Outputs match Radxa within tolerance.
 
+2026-06-24 progress: Orange Pi Zero 3W at `192.168.31.225` has compatible
+`/dev/vipcore` and ran the real SmolLM2-135M-Instruct W=32 int16 NBG through a
+rebuilt VIPLite runner. Verified runtime logged `cid=0x1000003b`,
+`network_core_count=1`, `nbg_loaded_once=1`, coherent text, and about
+`21 tok/s`. Qwen2.5-0.5B remains blocked before board upload because no tested
+mixed BF16/int16 host candidate exported a valid NBG.
+
 ## Phase 6 - Benchmark And Documentation
 
 Gate G6:

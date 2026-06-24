@@ -14,6 +14,12 @@
 #define MAX_PROMPT_TOKENS 256
 #define MAX_TOPK 5
 
+#ifdef A733_VIP_LEGACY_DEVICE_ID
+#define A733_VIP_NETWORK_PROP_SET_DEVICE VIP_NETWORK_PROP_SET_DEVICE_ID
+#else
+#define A733_VIP_NETWORK_PROP_SET_DEVICE VIP_NETWORK_PROP_SET_DEVICE_INDEX
+#endif
+
 typedef struct {
     const char *model_dir;
     const char *nbg_path;
@@ -438,7 +444,7 @@ static int runner_create(runner_t *runner, const runner_args_t *args, const char
     printf("create_network_us=%" PRIu64 "\n", now_us() - t0);
 
     if (args->device_index > 0) {
-        status = vip_set_network(runner->network, VIP_NETWORK_PROP_SET_DEVICE_INDEX,
+        status = vip_set_network(runner->network, A733_VIP_NETWORK_PROP_SET_DEVICE,
                                  (void *)&args->device_index);
         if (status != VIP_SUCCESS) {
             fprintf(stderr, "vip_set_network(device) failed: %d\n", status);
@@ -446,12 +452,16 @@ static int runner_create(runner_t *runner, const runner_args_t *args, const char
         }
     }
     if (args->core_index != -1) {
+#ifndef A733_VIP_NO_CORE_INDEX
         status = vip_set_network(runner->network, VIP_NETWORK_PROP_SET_CORE_INDEX,
                                  (void *)&args->core_index);
         if (status != VIP_SUCCESS) {
             fprintf(stderr, "vip_set_network(core) failed: %d\n", status);
             return -1;
         }
+#else
+        fprintf(stderr, "vip_set_network(core) skipped: SDK has no core-index property\n");
+#endif
     }
     if (args->timeout_ms != 0) {
         status = vip_set_network(runner->network, VIP_NETWORK_PROP_SET_TIME_OUT,

@@ -728,3 +728,60 @@ workspace artifacts.
   - No package was uploaded to `192.168.31.225`, and no board reset or
     power-cycle was requested.
 - Report added: `reports/t9-qwen-bf16.md`.
+
+- Task T10-qwen-mixed-bf16 started and stopped at the required host Gate A.
+  Orange Pi Qwen work was not started because no mixed BF16/int16 Qwen NBG was
+  produced.
+  - Added `scripts/host/make_qwen2_mixed_bf16_quantize.py` for generating
+    mixed Qwen ACUITY quantize tables from the existing int16 and BF16 tables.
+  - Verified the first BF16-base/int16-logits seed reached export but failed on
+    an unsupported `SLICE` dtype boundary:
+    `BFLOAT16 -> DFP INT16`, node `1664`, fatal model generation error
+    `65280`; log:
+    `logs/host/t10-qwen25-w32-mixed-bf16-convert.err.log`.
+  - Verified the corrected BF16-transformer/int16-embedding-and-projection seed
+    kept ACUITY host top-1 token `198`, but failed NBG generation at
+    `vnn_VerifyGraph` with status `-3` and fatal model generation error
+    `64768`; log:
+    `logs/host/t10-qwen25-w32-mixed-bf16-v2-convert.err.log`.
+  - Verified the int16-base auto-outlier seed replaced `153` qparams with BF16
+    outlier regions, kept ACUITY host top-1 token `198`, but failed export on
+    `MATRIXMUL` node `41`: `DFP INT16, DFP INT16 -> BFLOAT16`; log:
+    `logs/host/t10-qwen25-w32-mixed-bf16-outliers-convert.err.log`.
+  - Result: no tested Qwen mixed BF16/int16 split satisfied Gate A. Qwen was not
+    uploaded to `192.168.31.225`, and no board reset or power-cycle was
+    requested.
+- Report added: `reports/t10-qwen-mixed-bf16.md`.
+
+- Task T10b-orangepi-smollm2 completed independently of Qwen.
+  - Verified Orange Pi Zero 3W target at `192.168.31.225`: hostname
+    `orangepizero3w`, kernel `6.6.98-sun60iw2`, RAM `5.7Gi`, `/dev/vipcore`
+    present as major/minor `199,0`; log:
+    `logs/board/t10b-orangepi-board-info.log`.
+  - Regenerated SmolLM2-135M-Instruct W=32 ONNX after cleanup:
+    `work/generated/smollm2_135m_w32/real_llm.onnx`, size `538,377,902`
+    bytes.
+  - Regenerated known-coherent int16 NBG package:
+    `work/model-packages/smollm2_135m_w32_int16/int16/network_binary.nb`, size
+    `280,882,632` bytes; metadata input `token_ids` int32 `1x32`, output logits
+    int16 dynamic fixed point `1x1x49152`, `fl=9`.
+  - Uploaded package, tokenizer, and board scripts to
+    `/home/orangepi/a733_npu_driver/`.
+  - Updated `scripts/board/npu_lm_runner.c` and
+    `scripts/board/build-npu-lm-runner.sh` for the Orange Pi image's older
+    VIPLite header variant (`VIP_NETWORK_PROP_SET_DEVICE_ID`, no core-index
+    property), then verified the build script with `--vip-inc
+    /home/orangepi/yolo_shm --vip-lib /home/orangepi/lib`; log:
+    `logs/board/t10b-orangepi-build-runner-script.log`.
+  - Verified NPU execution on Orange Pi:
+    `vip_init=OK`, `cid=0x1000003b`, `network_core_count=1`,
+    `nbg_loaded_once=1`, `mean_tok_s=21.150`, answer prefix `Hello! I'm`; log:
+    `logs/board/t10b-orangepi-smollm2-verbose.log`.
+  - Verified longer coherent text with prompt
+    `Write a friendly one sentence greeting.`; log:
+    `logs/board/t10b-orangepi-smollm2-greeting.log`, metrics
+    `mean_tok_s=21.302`.
+  - Result: SmolLM2 W=32 int16 passes the Orange Pi NPU-only coherent-text
+    check. CPU work remains tokenization, fixed-window orchestration,
+    argmax/sampling, detokenization, and logging.
+- Report added: `reports/t10b-orangepi-smollm2.md`.
