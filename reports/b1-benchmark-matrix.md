@@ -39,7 +39,7 @@ tokens and left-pads with zero when `W` is larger than the prompt. This matches
 | SmolLM2-360M-Instruct | 256 | verified cosine `0.999999995`, top-1 `198` match | verified cosine `0.287806907`, top-1 mismatch `36616` vs `198` | fail by `>=0.99` rule | not run by literal host-gate rule | 708,452,104 bytes |
 | SmolLM2-1.7B-Instruct | 32 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.268220295`, top-1 mismatch `31532` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; `gen_nbg` segfaulted before valid NBG | 0 bytes (`gen_nbg` failed) |
 | SmolLM2-1.7B-Instruct | 64 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.285665032`, top-1 mismatch `198` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; ACUITY export left 0-byte NBG | 0 bytes (`gen_nbg` failed) |
-| SmolLM2-1.7B-Instruct | 128 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
+| SmolLM2-1.7B-Instruct | 128 | verified cosine `1.000000000`, top-1 `504` match | verified cosine `0.222273584`, top-1 mismatch `970` vs `504`; NBG export failed | fail by `>=0.99` rule | not run by literal host-gate rule; ACUITY export left 0-byte NBG | 0 bytes (`gen_nbg` failed) |
 | SmolLM2-1.7B-Instruct | 256 | verified cosine `1.000000000`, top-1 `504` match | pending | pending | not run yet | pending |
 
 ## Notes
