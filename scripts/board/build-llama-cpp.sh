@@ -5,7 +5,7 @@ A733_LLAMA_DIR="${A733_LLAMA_DIR:-$HOME/llama.cpp}"
 A733_LLAMA_REPO="${A733_LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 A733_LLAMA_REF="${A733_LLAMA_REF:-master}"
 A733_LLAMA_BUILD_DIR="${A733_LLAMA_BUILD_DIR:-$A733_LLAMA_DIR/build}"
-A733_LLAMA_TARGETS="${A733_LLAMA_TARGETS:-llama-simple llama-simple-chat llama-bench}"
+A733_LLAMA_TARGETS="${A733_LLAMA_TARGETS:-llama-cli llama-completion llama-bench llama-simple llama-simple-chat}"
 
 for tool in git cmake g++; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -26,6 +26,7 @@ cmake -S "$A733_LLAMA_DIR" -B "$A733_LLAMA_BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=Release \
   -DGGML_NATIVE=ON \
   -DGGML_OPENMP=ON \
+  -DLLAMA_BUILD_EXAMPLES=ON \
   -DLLAMA_BUILD_TESTS=OFF
 
 for target in $A733_LLAMA_TARGETS; do

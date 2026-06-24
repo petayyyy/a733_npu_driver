@@ -855,3 +855,44 @@ workspace artifacts.
   - Verified SmolLM2-360M-Instruct W=32 ACUITY int16 host gate fails:
     cosine `0.131091912`, top-1 `99` vs oracle `57`, NBG `672,715,688`
     bytes. Remaining 360M and 1.7B ACUITY int16 host gates are still pending.
+
+- Task B4-qwen-cpu-baseline completed as a CPU diagnostic fallback baseline,
+  not an NPU project gate.
+  - Verified Orange Pi Zero 3W at `192.168.31.225` was idle before B4 board
+    runs: no unrelated `llama-*`, `monitor_command.py`, `vpm_run`,
+    `npu_lm_runner`, `cmake`, or `ninja` jobs, and `docker ps` was empty.
+  - Built llama.cpp on the Orange Pi at commit `be4a6a6` with native ARM
+    OpenMP/dotprod support and the required `llama-bench`, `llama-cli`, and
+    `llama-completion` targets.
+  - Downloaded official Qwen2.5-0.5B-Instruct GGUFs:
+    Q4_K_M sha256
+    `74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db`;
+    Q8_0 sha256
+    `ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e`.
+  - Verified thread sweep on Q4_K_M at 2k context: all-core prompt prefill was
+    fastest (`22.67 tok/s` at 8 threads), but decode was best on one A76
+    (`12.72 tok/s`) and worsened on all cores (`7.80 tok/s`). Used A76-only
+    `taskset -c 6,7`, `-t 2` for the quant/context sweep.
+  - Verified Q8_0 is faster than Q4_K_M on this board/build despite higher RSS:
+    at 2k `47.84/11.67 tok/s` pp/tg vs Q4 `18.03/10.92`; at 8k
+    `22.13/11.50` vs Q4 `12.64/10.66`; at 16k `13.27/12.13` vs Q4
+    `9.23/11.03`.
+  - Verified measured 16k context is the practical ceiling for this run.
+    32k is estimated to fit RAM but need about `69-81` minutes to first token;
+    Q4 32k was started and stopped as impractical, with no measured result
+    claimed.
+  - Verified real chat via `llama-completion` because this llama.cpp revision
+    reports `--no-conversation is not supported by llama-cli`.
+    Short Q8 first stdout was `2.958s`, wall `5.182s`, peak RSS `1,224,992 KB`.
+  - Verified near-16k Q8 chat demo: `15,908` prompt tokens, first stdout
+    `1,120.438s`, wall `1,158.594s`, peak RSS `1,339,908 KB`, prompt eval
+    `14.23 tok/s`, decode over the long KV cache `2.19 tok/s`.
+    The answer was coherent but retrieved the final synthetic key incorrectly
+    (`ORANGE-A76-0100` vs expected `ORANGE-A76-0280`), so 16k is a measured
+    capacity/performance point, not a passed tail-retrieval reliability point.
+  - Recommendation for ROS2-frozen fallback: Qwen2.5-0.5B-Instruct `Q8_0`,
+    A76-only `taskset -c 6,7`, `-t 2`, and 8k default context. Use 16k only
+    when the long first-token wait and validation/retry cost are acceptable.
+    For ROS2-running mode, keep using the NPU SmolLM2 path so the A76 cores
+    stay free.
+  - Report added: `reports/b4-qwen-cpu-baseline.md`.
