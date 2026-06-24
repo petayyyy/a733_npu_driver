@@ -967,7 +967,7 @@ workspace artifacts.
     was already deployed; no ACUITY rebuild was required.
   - Report added: `reports/b2-chat-shell.md`.
 
-- Task B3-vlm-orangepi started and is blocked before Orange Pi execution.
+- Task B3-vlm-orangepi completed on the Orange Pi Zero 3W.
   - Verified host-side B3 MobileCLIP-S0 vision package regeneration with Docker
     resources `--cpus 10 --memory 24g`:
     `work/model-packages/b3_mobileclip_s0_vision_int16/int16/network_binary.nb`,
@@ -983,11 +983,26 @@ workspace artifacts.
   - Added host helpers:
     `scripts/host/make_mobileclip_input.py` and
     `scripts/host/pack_nbg_input_from_text.py`.
-  - Verified Orange Pi SSH is currently not usable: OpenSSH to
-    `orangepi@192.168.31.225:22` returns `Permission denied` at connect time,
-    and a Docker `/dev/tcp` scan reports checked ports `22`, `2222`, `2200`,
-    `80`, `443`, `8080`, `8888`, and `5900` closed.
-  - No B3 board idle check, upload, NPU run, latency/RSS measurement, or
-    output comparison was performed because the board execution channel is
-    blocked.
+  - Added board helper: `scripts/board/run-b3-vpm-package.sh`.
+  - Verified Orange Pi was idle before B3 runs and after validation: no
+    unrelated `npu_lm_runner`, `vpm_run`, `chat_shell.py`, `llama`,
+    `monitor_command.py`, `cmake`, or `ninja` processes, and `/dev/vipcore`
+    had no users.
+  - Verified MobileCLIP-S0 vision encoder on Orange Pi NPU through
+    `/opt/vpm_run/vpm_run` and `/home/orangepi/lib`: VIPLite
+    `2.0.3.2-AW-2024-08-30`, `cid=0x1000003b`, `vpm run ret=0`,
+    profile mean `22,605.8us`, wall mean `22,767.4us`, working memory pool
+    `1,573,888` bytes, peak RSS `14,080 KB`, peak VmHWM `21,248 KB`.
+    ACUITY host vs Orange Pi embedding comparison: top-5 match yes, max abs
+    diff `0.001373291`, mean abs diff `0.000309840`, cosine `0.999955977`.
+  - Verified the board-produced MobileCLIP embedding was packed into the tiny
+    VLM bridge input and the bridge ran end-to-end on Orange Pi NPU with token
+    window `1 5 9 2`: `cid=0x1000003b`, `vpm run ret=0`, profile mean
+    `62.6us`, wall mean `140.4us`, equivalent profile rate
+    `15,974.441 tok/s`, memory pool `0` bytes, peak RSS `1,792 KB`.
+  - Verified bridge logits vs ACUITY host reference: full output top-5 match
+    yes, cosine `0.999982426`; last-token top-5 match yes, top-1 token `12`,
+    last-token cosine `0.999999036`.
+  - Result: B3 passes as an Orange Pi proof-of-concept VLM-on-NPU path:
+    vision encoder plus tiny projector/bridge/decoder/logits run on NPU.
   - Report added: `reports/b3-vlm-orangepi.md`.
