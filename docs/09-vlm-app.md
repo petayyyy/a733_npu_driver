@@ -33,13 +33,9 @@ cmake -B build -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2a -DGGML_OPENMP=OFF
 cmake --build build --target llama-cli -- -j4
 ```
 
-> If you need the NPU-offload mode, apply the V2c mtmd patch before building:
-> ```bash
-> # The patch replaces clip_image_batch_encode with file read when
-> # A733_NPU_EMBEDDINGS env var is set.
-> patch -p1 < ~/a733_npu_driver/scripts/board/v2c_mtmd.patch
-> ```
-> The patch is already applied in the pre-built binary on the reference board.
+> If you need the NPU-offload mode, first bring up the NPU
+> ([docs/02-board-bringup.md](02-board-bringup.md)), then apply the V2c mtmd
+> patch before building llama.cpp. The patch is pre-applied on the reference board.
 
 ## Step 3: Download Models
 
@@ -97,8 +93,10 @@ Close other apps. The 256M model only needs ~634 MB and should always fit.
 **"PIL not installed"** — `pip3 install Pillow --break-system-packages`. NPU mode
 needs PIL for image preprocessing; CPU mode doesn't.
 
-**NPU mode: "vpm_run not found"** — NPU requires VIPLite setup. Follow
-[docs/02-board-bringup.md](02-board-bringup.md). Use `--cpu-only` as fallback.
+**NPU mode: "vpm_run not found"** — NPU requires VIPLite setup and NBG package.
+Follow [docs/02-board-bringup.md](02-board-bringup.md) for `/dev/vipcore` bring-up,
+then [docs/05-run-vlm-npu.md](05-run-vlm-npu.md) for the SmolVLM vision NBG.
+Use `--cpu-only` as fallback.
 
 **NPU mode: "NBG not found"** — the SmolVLM vision encoder NBG package is
 missing. Requires ACUITY host build (not covered here). Use `--cpu-only`.
