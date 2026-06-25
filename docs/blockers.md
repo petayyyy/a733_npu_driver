@@ -59,19 +59,23 @@ external-data ONNX graph.
 
 Report: [b1b](../reports/b1b-benchmark-matrix.md)
 
-## Blocker 4 — SmolVLM SigLIP vision encoder on NPU (RESOLVED at host level, e2e injection pending)
+## Blocker 4 — SmolVLM SigLIP vision encoder on NPU ✓ RESOLVED (V2d)
 
 SmolVLM-256M SigLIP encoder (Idefics3 wrapper): **Conv→Reshape+MatMul rewrite
 succeeded.** NBG exports (271 MB, Error 0), runs on Orange Pi NPU at
 5.94 sec/image (verified: `cid=0x1000003b`, `vpm run ret=0`). Rebuilt with
-real-image calibration (fl=15, range [-1,1]). **Host quality gate PASSED:
-NPU int16 vs PyTorch FP32 cosine 0.9914** (same dog.jpg input). Per-token
-cosine 0.93–0.999.
+real+uniform mixed calibration (fl=15, range [-1,1]). **Host quality gate PASSED:
+NPU int16 vs PyTorch FP32 cosine 0.9945**. Board NPU vs ONNX Runtime cosine
+**0.9972** (dog.jpg).
 
-Toolchain fully proven. Embedding injection into llama.cpp decoder remains
-as software integration step. V1 CPU-only remains runnable deliverable.
+**V2d E2E validated**: NPU embeddings injected into llama.cpp SmolVLM decoder
+via V2c mtmd patch (`A733_NPU_EMBEDDINGS` env var). All 3 V1 test images
+(dog, cat, moon-landing newspaper) produce ACCURATE answers matching V1 CPU
+quality. Vision runs on NPU at 5.95 sec (0 CPU), LLM decode at ~46.5 tok/s
+(2×A76). **Fully resolved — hybrid VLM with NPU vision offload is a proven
+deliverable.**
 
-Reports: [v2](../reports/v2-hybrid-vlm-npu-offload.md), [v2b](../reports/v2b-smolvlm-vision-npu-retry.md), [v2c](../reports/v2c-vlm-npu-e2e.md)
+Reports: [v2](../reports/v2-hybrid-vlm-npu-offload.md), [v2b](../reports/v2b-smolvlm-vision-npu-retry.md), [v2c](../reports/v2c-vlm-npu-e2e.md), [v2d](../reports/v2d-vlm-npu-mmproj-glue.md)
 
 ## Blocker 5 — No KV-cache
 

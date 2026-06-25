@@ -1291,12 +1291,46 @@ V2 gate blocked: SmolVLM vision encoder cannot convert to NBG (ACUITY NonZero + 
   - Updated docs: `blockers.md`, `RESULTS.md`, `configurations.md`.
   - Host script: `scripts/host/export_smolvlm_vision_v2b.py`.
 
+## 2026-06-25
+
+- Task V2d-vlm-npu-mmproj-glue completed: **SUCCESS GATE PASSED**. SmolVLM-256M
+  hybrid VLM runs end-to-end with vision on NPU + LLM on CPU. All 3 V1 test
+  images produce accurate answers. CPU offload: 2 A76 cores freed for ROS2.
+  - Verified ACUITY int16 NBG rebuilt with mixed real-image+uniform calibration
+    (fl=15, range [-1,1]): `network_binary.nb` 271 MB, export `Error(0),Warning(0)`.
+  - Verified host quality: ACUITY int16 vs PyTorch FP32 cosine **0.9945** (>0.95 PASS).
+  - Verified board quality: NPU int16 vs ONNX Runtime FP32 cosine **0.9972** (dog.jpg).
+  - Verified NPU vision runs on Orange Pi: `cid=0x1000003b`, `vpm run ret=0`,
+    create 237ms, prepare 12.4s, profile **5,958ms**/image, pool 21 MB.
+  - Verified llama-cli integration via V2c mtmd patch: `A733_NPU_EMBEDDINGS` env
+    routes NPU embeddings into SmolVLM decoder. Raw `<image>` prompt format
+    works around llama.cpp `be4a6a6` chat-template media-marker bug.
+  - Verified E2E accuracy on 3 images (dog, cat, moon-landing newspaper):
+    - dog.jpg: "white fluffy dog... lush green lawn" — ACCURATE ✅
+    - cat.jpg: "The animal in this image is a cat." — ACCURATE ✅
+    - test-1.jpeg: "MEN WALK ON MOON... newspaper clipping" — ACCURATE ✅
+    All 3 match V1 CPU-only quality.
+  - Verified measurements: NPU vision 5.94 sec (0 CPU), LLM decode ~46.5 tok/s
+    (2×A76), A76 cores freed for ROS2.
+  - Verified llama-cli workaround: `printf '/exit\n' | llama-cli --simple-io`
+    exits after first response; `--no-conversation` is rejected by llama-cli
+    with `--image`; `llama-completion` lacks `--mmproj` support.
+  - Added files: `scripts/host/prepare_v2d.py`, `scripts/host/fix_onnx_v2d.py`,
+    `scripts/host/prep_npu_image.py`, `scripts/board/npu_vlm_injector.c`,
+    `scripts/board/run-v2d-e2e.sh`.
+  - Updated docs: `blockers.md` (Blocker 4 → RESOLVED), `RESULTS.md` (V2d hybrid
+    VLM row), `docs/05-run-vlm-npu.md`.
+  - Report added: `reports/v2d-vlm-npu-mmproj-glue.md`.
+  - Board logs: `/home/orangepi/a733_npu_driver/logs/v2d/`.
+  - NBG: `work/model-packages/smolvlm_256m_vision_v2d/int16/`.
+  - Board NBG: `/home/orangepi/a733_npu_driver/models/smolvlm_256m_vision_v2d_int16/`.
+
 ## Next Gate
 
-SmolVLM vision-on-NPU toolchain path proven (Conv→MatMul rewrite, NBG exports,
-runs on Orange Pi NPU at 6.0 sec/image). Remaining: rebuild NBG with real-image
-calibration, wire NPU embeddings into llama.cpp SmolVLM decoder, validate V1-level
-answer accuracy. Q2 Qwen block-chain and V1 CPU VLM remain the active deliverables.
+Hybrid VLM with NPU vision offload is a PROVEN deliverable. SmolVLM vision
+encoder runs on NPU at 5.94 sec (0 CPU), answers accurate on all V1 test images.
+Q2 Qwen block-chain and V1 CPU VLM remain the active deliverables.
 
 NPU-vision validated for both MobileCLIP-S0 (22.6ms) and SmolVLM SigLIP (5,959ms).
-SmolLM2-135M int16 runs on Orange Pi NPU at 21 tok/s.
+SmolLM2-135M int16 runs on Orange Pi NPU at 21 tok/s. Hybrid (NPU vision → CPU LLM)
+is the recommended production path for SmolVLM image chat on this silicon.

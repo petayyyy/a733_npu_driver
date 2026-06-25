@@ -14,6 +14,7 @@ benchmarks, and the hybrid CPU-NPU path recommended for production.
 | G3a | 2026-06-22 | Passed | Transformer decoder block, tiny LM, VLM bridge, decode loop on NPU |
 | G5 | 2026-06-24 | Passed | Orange Pi port: `/dev/vipcore`, NBG binary-compatible, runner rebuilt |
 | G6 | 2026-06-25 | Passed | Full benchmark matrix (SmolLM2-135M/360M at W=32/64/128/256), CPU baselines (Qwen, SmolVLM), VLM benchmarks, CPU utilization sweep |
+| G7 | 2026-06-25 | Passed | Hybrid VLM: NPU SmolVLM vision + CPU LLM, accurate on 3 test images, 2 A76 cores freed |
 
 ### Detailed gate log
 
@@ -32,7 +33,7 @@ See [reports/status.md](../reports/status.md) for the full chronological log.
 
 - Qwen2.5-0.5B NPU: every monolithic and block-chain config fails (see blockers.md)
 - SmolLM2-1.7B NPU: gen_nbg segfault (0-byte NBG)
-- SmolVLM SigLIP NPU: ACUITY Conv shape crash
+- **SmolVLM SigLIP NPU: RESOLVED (V2d)** — Conv→MatMul rewrite + NPU→llama.cpp injection, accurate on 3 test images
 - No KV-cache: static-shape NBG, fixed window only
 
 ## Remaining Open Items

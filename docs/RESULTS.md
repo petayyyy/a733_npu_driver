@@ -111,11 +111,31 @@ SmolVLM-256M Q8_0 is the recommended VLM: fast (52.6 tok/s), accurate, 634 MB
 RSS leaves ~2.3 GB for ROS2. Its SigLIP vision encoder cannot be exported to
 NPU (ACUITY Conv shape crash, see V2 report).
 
+### Hybrid VLM: NPU Vision + CPU LLM (V2d, verified)
+
+| Component | Input | Output | Latency | Peak RSS | NBG MB | Cosine |
+|---|---|---|---|---|---|---|
+| SmolVLM SigLIP on NPU (V2d) [verified] | 1×3×512×512 int16 | 1×64×576 float32 | 5,958 ms | 21 MB pool | 271 | 0.9972 vs ONNX |
+| SmolVLM LLM on CPU (V2d) [verified] | 64 img tokens + prompt | text | ~46.5 tok/s | ~634 MB | — | accurate |
+
+**E2E accuracy verified** on 3 V1 test images (dog, cat, moon-landing newspaper).
+All answers match V1 CPU-only quality. NPU vision at 5.95 sec/0 CPU; A76 cores
+free for ROS2. See [v2d](../reports/v2d-vlm-npu-mmproj-glue.md).
+
+| Metric | V1 (CPU VLM) | V2d (NPU Vision + CPU LLM) |
+|---|---|---|
+| Vision latency | ~1-2 sec (estimated) | **5.94 sec** (measured) |
+| A76 cores for vision | 2 (fully loaded) | **0** (NPU only) |
+| A76 free for ROS2 | 0 | **2** |
+| LLM decode tok/s | 52.6 | 46.5 |
+| Answer accuracy | accurate | **accurate (verified)** |
+
 ### VLM on NPU (attempted, blocked)
 
 | Component | Blocker | Status |
 |---|---|---|
-| SmolVLM SigLIP encoder | ACUITY `_conv_shape` IndexError (patch embedding Conv) | [verified blocked] |
+| SmolVLM SigLIP encoder (raw ONNX) | ACUITY `_conv_shape` IndexError | Resolved via Conv→MatMul rewrite (V2b) |
+| SmolVLM vision on NPU → CPU LLM injection | llama-cli + chat-template media marker bug | Resolved via raw `<image>` prompt + V2c mtmd patch (V2d) |
 
 ## Table 4: Hardware / NPU Facts (verified)
 
