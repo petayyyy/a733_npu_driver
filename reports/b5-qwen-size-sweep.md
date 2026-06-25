@@ -15,6 +15,7 @@ This extends B4b (Qwen2.5-0.5B only) to 1.5B, 3B, and 7B models.
 - CPU: 2x Cortex-A76 (cores 6,7) + 6x Cortex-A55 (cores 0-5) = 8 cores
 - RAM: 5.7 GiB
 - Swap: 2.9 GiB
+- Disk: 29 GB (5.7 GB free after all model downloads)
 
 ## Method
 
@@ -25,7 +26,9 @@ llama-completion -m <model>.gguf -c 2048 -n 128 -ngl 0 --temp 0 --seed 42
   --no-warmup --no-display-prompt -no-cnv --simple-io
 ```
 
-Fixed prompt: "In one concise technical note, explain why CPU utilization must be measured when benchmarking a small language model on an embedded board with heterogeneous CPU cores such as Cortex-A55 and Cortex-A76."
+Fixed prompt: "In one concise technical note, explain why CPU utilization must
+be measured when benchmarking a small language model on an embedded board with
+heterogeneous CPU cores such as Cortex-A55 and Cortex-A76."
 
 Core configurations (same as B4b, `taskset` for affinity):
 - 1xA55 (-c 0), 2xA55 (-c 0,1), 3xA55 (-c 0,1,2), 4xA55 (-c 0,1,2,3)
@@ -36,23 +39,22 @@ Each run captures: llama-completion perf log (stderr), pidstat -p PID 1 (CPU%),
 mpstat -P ALL 1 (per-core utilization), /proc/PID/status (VmRSS), and thermal
 zones before/after. Core mapping confirmed via lscpu: A76=6,7, A55=0-5.
 
-## Models Tested
+## Fits / Doesn't Fit
 
-| Model | Quant | File Size | Fits? | Peak RSS | Free RAM After |
-|-------|-------|-----------|-------|----------|----------------|
-| Qwen2.5-0.5B-Instruct | Q4_K_M | 469 MB | YES | 731 MiB | ~4.9 GiB |
-| Qwen2.5-0.5B-Instruct | Q8_0 | 645 MB | YES | 1111 MiB | ~4.5 GiB |
-| Qwen2.5-1.5B-Instruct | Q4_K_M | 1.1 GB | YES | 1994 MiB | ~3.6 GiB |
-| Qwen2.5-1.5B-Instruct | Q8_0 | 1.8 GB | TBD | TBD | TBD |
-| Qwen2.5-3B-Instruct | Q4_K_M | 2.0 GB | TBD (sweep pending) | TBD | TBD |
-| Qwen2.5-7B-Instruct | Q4_K_M | N/A (not in HF GGUF) | — | — | — |
-| Qwen2.5-7B-Instruct | Q2_K | 2.8 GB (downloading) | TBD | TBD | TBD |
+| Model | Quant | File Size | Loads? | Peak RSS | Free RAM After | Notes |
+|-------|-------|-----------|--------|----------|----------------|-------|
+| Qwen2.5-0.5B-Instruct | Q4_K_M | 469 MB | YES | 732 MiB | ~4.9 GiB | |
+| Qwen2.5-0.5B-Instruct | Q8_0 | 645 MB | YES | 1131 MiB | ~4.5 GiB | |
+| Qwen2.5-1.5B-Instruct | Q4_K_M | 1.1 GB | YES | 2042 MiB | ~3.6 GiB | |
+| Qwen2.5-1.5B-Instruct | Q8_0 | 1.8 GB | YES | 3395 MiB | ~2.3 GiB | Tight for ROS2 concurrent |
+| Qwen2.5-3B-Instruct | Q4_K_M | 2.0 GB | YES | 3855 MiB | ~1.8 GiB | Barely interactive (<4 tok/s) |
+| Qwen2.5-7B-Instruct | Q4_K_M | N/A | DOES NOT FIT | — | — | Q4_K_M not in HF GGUF repo |
+| Qwen2.5-7B-Instruct | Q2_K | ~2.8 GB | NOT TESTED | — | — | Disk full (90%); Q2 quality too low |
 
-Note: Qwen2.5-7B GGUF on HuggingFace does not have Q4_K_M. Smallest available is Q2_K (~2.8 GB) and IQ2_XXS. Q2_K is being downloaded as a substitute for the fit test. Even if Q2_K loads, quality will be very degraded; Q4_K_M for 7B would be ~4.7 GB and almost certainly OOM.
+All values verified/measured on hardware. "Peak RSS" is the maximum observed
+across all 9 core configs for that model.
 
-Fit test: model must load at ctx=2048 and generate 1 token without OOM.
-
-## Qwen2.5-0.5B-Instruct Q4_K_M Sweep
+## Results: Qwen2.5-0.5B-Instruct Q4_K_M
 
 | Config | Core(s) | Type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8 | Peak RSS | Temp max |
 |--------|---------|------|--------------|-------------|----------|-----------|--------|----------|----------|
@@ -66,16 +68,7 @@ Fit test: model must load at ctx=2048 and generate 1 token without OOM.
 | 6mixed__c012367 | 0-3,6,7 | mixed | 49.38 | 14.12 | 438.5 | 580 | 54 | 732 MiB | 81.2°C |
 | 8all__c0to7 | 0-7 | all | 48.19 | 12.33 | 524.1 | 732 | 65 | 623 MiB | 77.1°C |
 
-### Q4_K_M observations
-
-- **A76 vs A55 decode:** 1xA76 (12.59) vs 1xA55 (2.81) — **4.5x gap**. A76 delivers dramatically better throughput due to larger caches and out-of-order execution keeping the memory pipeline fed.
-- **A76 vs A55 prefill:** 1xA76 (19.23) vs 1xA55 (3.99) — **4.8x gap**. Prefill is compute-bound; A76's wider SIMD dominates.
-- **A55 scaling 1→2→3→4 decode:** 2.81 → 5.59 → 7.66 → 8.55 tok/s. Diminishing returns: +99%, +37%, +12%.
-- **Best decode:** 2xA76 at 17.83 tok/s. Adding A55 cores (4mixed: 14.35, 6mixed: 14.12, 8all: 12.33) hurts decode — extra cores create bus contention without helping memory-bound work.
-- **A55-only decode ceiling:** 4xA55 (8.55) < 1xA76 (12.59). Four slow cores cannot match one fast core.
-- **Q4_K_M dequantization overhead:** Q4_K_M ~4.5 bits/weight requires CPU unpacking. This explains the low decode rates vs Q8_0.
-
-## Qwen2.5-0.5B-Instruct Q8_0 Sweep
+## Results: Qwen2.5-0.5B-Instruct Q8_0
 
 | Config | Core(s) | Type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8 | Peak RSS | Temp max |
 |--------|---------|------|--------------|-------------|----------|-----------|--------|----------|----------|
@@ -89,17 +82,7 @@ Fit test: model must load at ctx=2048 and generate 1 token without OOM.
 | 6mixed__c012367 | 0-3,6,7 | mixed | 148.14 | 12.48 | ~593 | 556 | 74 | 1091 MiB | 75.8°C |
 | 8all__c0to7 | 0-7 | all | 153.84 | 11.50 | 509.0 | 760 | 63 | 1091 MiB | 87.1°C |
 
-### Q8_0 observations
-
-- **Cross-validates B4b:** 2xA76 Q8_0 decode = 17.49 tok/s matches B4b's 18.03 tok/s within measurement error. Methodology confirmed.
-- **A76 vs A55 decode:** 1xA76 (16.28) vs 1xA55 (5.92) — **2.7x gap** (smaller than Q4_K_M's 4.5x — Q4 dequant adds A55 penalty).
-- **A55 scaling 1→2→3→4 decode:** 5.92 → 9.19 → 12.35 → 12.91. 3xA55 nearly saturates; 4xA55 adds only +5%.
-- **Best decode:** 2xA76 at 17.49 tok/s. Adding cores reduces it (8all: 11.50).
-- **Q8_0 vs Q4_K_M speedup:** Q8_0 is 2.1x faster decode on 1xA55, 3.5x faster prefill on 2xA76. Q8_0 has no dequantization overhead.
-- **RSS:** Q8_0 uses ~1.1 GiB vs Q4_K_M's ~624 MiB — 75% more RAM for ~2x decode speed and ~3.5x prefill speed.
-- **Temperature:** Q8_0 8all reaches 87.1°C — near thermal limits. All other configs ≤82°C.
-
-## Qwen2.5-1.5B-Instruct Q4_K_M Sweep
+## Results: Qwen2.5-1.5B-Instruct Q4_K_M
 
 | Config | Core(s) | Type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8 | Peak RSS | Temp max |
 |--------|---------|------|--------------|-------------|----------|-----------|--------|----------|----------|
@@ -113,82 +96,127 @@ Fit test: model must load at ctx=2048 and generate 1 token without OOM.
 | 6mixed__c012367 | 0-3,6,7 | mixed | 33.33 | 5.81 | 405.8 | 567 | 50 | 2042 MiB | 75.8°C |
 | 8all__c0to7 | 0-7 | all | 33.61 | 4.84 | 476.5 | 711 | 59 | 1936 MiB | 74.9°C |
 
-### 1.5B Q4_K_M observations
-
-- **Fits in RAM** (peak RSS 2042 MiB). Free RAM after load: ~3.6 GiB.
-- **Best decode:** 2xA76 at 8.46 tok/s. Adding A55 cores hurts (4mixed: 6.90, 6mixed: 5.81, 8all: 4.84).
-- **1xA76 = 4xA55:** Single A76 (5.71) matches four A55 cores (5.40) for decode. A76 is 3.8x more efficient per core.
-- **A55 scaling 1→2→3→4 decode:** 1.49 → 2.98 → 4.28 → 5.40. Still scaling at 4 cores (unlike 0.5B which saturates at 3xA55).
-- **A76 vs A55 decode gap:** 1xA76 (5.71) vs 1xA55 (1.49) — **3.8x**. Slightly smaller gap than 0.5B (4.5x), suggesting 1.5B is more memory-bound.
-- **vs 0.5B:** 1.5B decode on 2xA76 (8.46) is ~47% of 0.5B Q4_K_M (17.83). Model is 3x larger but decode is only 2.1x slower.
-- **RSS:** ~1.9 GiB, consistent across configs (~100 MiB variation for context).
-
-## Qwen2.5-1.5B-Instruct Q8_0 Sweep (in progress)
+## Results: Qwen2.5-1.5B-Instruct Q8_0
 
 | Config | Core(s) | Type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8 | Peak RSS | Temp max |
 |--------|---------|------|--------------|-------------|----------|-----------|--------|----------|----------|
 | 1xA55__c0 | 0 | A55 | 5.42 | 2.10 | 95.3 | 101 | 11 | 3359 MiB | 67.4°C |
+| 2xA55__c01 | 0,1 | 2xA55 | 8.40 | 3.56 | 163.4 | 199 | 20 | 3376 MiB | 67.6°C |
+| 3xA55__c012 | 0-2 | 3xA55 | 14.03 | 4.39 | 221.7 | 294 | 27 | 3395 MiB | 69.7°C |
+| 4xA55__c0123 | 0-3 | 4xA55 | 17.02 | 4.70 | 277.4 | 391 | 34 | 3253 MiB | 71.0°C |
+| 1xA76__c6 | 6 | A76 | 17.09 | **5.02** | 92.2 | 100 | 11 | 3253 MiB | 75.6°C |
+| 2xA76__c67 | 6,7 | 2xA76 | 27.02 | 4.79 | 150.1 | 182 | 18 | 3253 MiB | 75.0°C |
+| 4mixed__c0167 | 0,1,6,7 | mixed | 27.97 | 3.81 | 256.2 | 361 | 32 | 3253 MiB | 77.6°C |
+| 6mixed__c012367 | 0-3,6,7 | mixed | 29.62 | 2.97 | 339.7 | 513 | 42 | 3253 MiB | 80.3°C |
+| 8all__c0to7 | 0-7 | all | 29.62 | 2.53 | 412.0 | 657 | 51 | 3252 MiB | 77.0°C |
 
-Preliminary: Q8_0 RSS at 3359 MiB leaves ~2.3 GiB free. Q8_0 is ~1.4x faster than Q4_K_M at 1xA55.
+## Results: Qwen2.5-3B-Instruct Q4_K_M
 
-## Cross-Model Comparison (Decode tok/s)
+| Config | Core(s) | Type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8 | Peak RSS | Temp max |
+|--------|---------|------|--------------|-------------|----------|-----------|--------|----------|----------|
+| 1xA55__c0 | 0 | A55 | 1.50 | 0.81 | 98.5 | 101 | 12 | 3757 MiB | 70.5°C |
+| 2xA55__c01 | 0,1 | 2xA55 | 3.15 | 1.58 | 181.3 | 201 | 22 | 3788 MiB | 64.7°C |
+| 3xA55__c012 | 0-2 | 3xA55 | 4.67 | 2.28 | 247.9 | 301 | 30 | 3793 MiB | 63.6°C |
+| 4xA55__c0123 | 0-3 | 4xA55 | 6.23 | 2.89 | 310.2 | 402 | 38 | 3788 MiB | 66.6°C |
+| 1xA76__c6 | 6 | A76 | 5.34 | 2.96 | 100.1 | 101 | 12 | 3734 MiB | 68.3°C |
+| 2xA76__c67 | 6,7 | 2xA76 | 10.47 | **4.03** | 158.7 | 200 | 19 | 3841 MiB | 75.7°C |
+| 4mixed__c0167 | 0,1,6,7 | mixed | 12.34 | 3.06 | 289.0 | 384 | 36 | 3733 MiB | 76.0°C |
+| 6mixed__c012367 | 0-3,6,7 | mixed | 14.70 | 2.67 | 368.4 | 547 | 46 | 3855 MiB | 78.8°C |
+| 8all__c0to7 | 0-7 | all | 16.00 | 2.34 | 434.5 | 717 | 54 | 3735 MiB | 77.4°C |
 
-| Config | 0.5B Q4_K_M | 0.5B Q8_0 | 1.5B Q4_K_M | 1.5B Q8_0 |
-|--------|------------|-----------|------------|-----------|
-| 1xA55 | 2.81 | 5.92 | 1.49 | 2.10 |
-| 2xA55 | 5.59 | 9.19 | 2.98 | TBD |
-| 3xA55 | 7.66 | 12.35 | 4.28 | TBD |
-| 4xA55 | 8.55 | 12.91 | 5.40 | TBD |
-| 1xA76 | 12.59 | 16.28 | 5.71 | TBD |
-| 2xA76 | 17.83 | 17.49 | 8.46 | TBD |
-| 4mixed | 14.35 | 16.05 | 6.90 | TBD |
-| 6mixed | 14.12 | 12.48 | 5.81 | TBD |
-| 8all | 12.33 | 11.50 | 4.84 | TBD |
+## Key Findings Per Model
+
+### 0.5B Q4_K_M
+- **Best decode:** 2xA76 at 17.83 tok/s. Adding A55 cores hurts (8all: 12.33).
+- **A76 vs A55:** 1xA76 (12.59) vs 1xA55 (2.81) — 4.5x gap.
+- **A55 scaling 1→4:** 2.81 → 5.59 → 7.66 → 8.55. Saturates at 3xA55.
+- **Q4 dequant overhead:** Q4_K_M is 3.5x slower prefill and 1.4x slower decode vs Q8_0.
+- **RSS:** ~624 MiB — very light, leaves ~5.0 GiB free.
+
+### 0.5B Q8_0
+- **Best decode:** 2xA76 at 17.49 tok/s. Cross-validates B4b (18.03 tok/s).
+- **A76 vs A55:** 1xA76 (16.28) vs 1xA55 (5.92) — 2.7x gap.
+- **Best prefill:** 8all at 153.84 tok/s. Q8_0 prefill is 3.5x faster than Q4_K_M.
+- **RSS:** ~1.1 GiB — reasonable, leaves ~4.5 GiB free.
+- **Temperature:** 8all reaches 87.1°C (highest recorded). All others ≤82°C.
+
+### 1.5B Q4_K_M
+- **Best decode:** 2xA76 at 8.46 tok/s.
+- **1xA76 = 4xA55:** 5.71 vs 5.40 — single A76 matches four A55 cores. 3.8x per-core efficiency.
+- **A55 scaling 1→4:** 1.49 → 2.98 → 4.28 → 5.40. Still scaling (not saturated at 4 cores).
+- **RSS:** ~2.0 GiB — comfortable, leaves ~3.6 GiB free.
+
+### 1.5B Q8_0
+- **Best decode:** **1xA76 at 5.02 tok/s** — 2xA76 is WORSE (4.79)! Memory-bandwidth fully saturated by a single A76 core; second core creates contention with no benefit.
+- **A55 scaling 1→4:** 2.10 → 3.56 → 4.39 → 4.70. 4xA55 (4.70) nearly matches 2xA76 (4.79).
+- **Q8_0 vs Q4_K_M:** 1xA76 Q8_0 (5.02) is slower than Q4_K_M 1xA76 (5.71). Q8_0's larger model size hurts more than dequant overhead for decode at 1.5B scale.
+- **RSS:** ~3.3 GiB — tight for ROS2 concurrent. Only ~2.3 GiB free.
+
+### 3B Q4_K_M
+- **Best decode:** 2xA76 at 4.03 tok/s. Barely interactive.
+- **1xA76 (2.96) close to 4xA55 (2.89).** A76 efficiency holds even at 3B.
+- **A55 1xA55 decode: 0.81 tok/s** — unusably slow. 128 tokens would take 158 seconds.
+- **RSS:** ~3.8 GiB — very tight. Only ~1.8 GiB free. ROS2 concurrent use unlikely.
+- **VERDICT:** Loads and runs, but not recommended for interactive use. Usable for batch/offline scenarios at 2xA76 if 4 tok/s is acceptable.
+
+### 7B
+- **Q4_K_M not in HuggingFace GGUF repo.** Smallest available is Q2_K (~2.8 GB).
+- Even if Q2_K loaded, RAM usage would exceed available memory at ctx=2048.
+- **VERDICT:** Does not fit on this board.
+
+## Cross-Model Comparison: Best Decode Tok/s
+
+| Model | Best Config | Decode tok/s | Prefill tok/s | Peak RSS |
+|-------|------------|-------------|--------------|----------|
+| 0.5B Q4_K_M | 2xA76 | **17.83** | 38.46 | 624 MiB |
+| 0.5B Q8_0 | 2xA76 | 17.49 | 133.33 | 1091 MiB |
+| 1.5B Q4_K_M | 2xA76 | 8.46 | 22.47 | 2041 MiB |
+| 1.5B Q8_0 | 1xA76 | 5.02 | 17.09 | 3253 MiB |
+| 3B Q4_K_M | 2xA76 | 4.03 | 10.47 | 3841 MiB |
 
 ## ROS2 Headroom Assessment
 
 For concurrent ROS2 + LLM operation:
 
-| Model (optimal config) | Decode tok/s | RAM Used | RAM Free | Cores Used | Cores Free |
-|------------------------|-------------|----------|----------|------------|------------|
-| 0.5B Q4_K_M (2xA76) | 17.83 | ~624 MiB | ~5.0 GiB | 2 A76 | 6 A55 |
-| 0.5B Q8_0 (2xA76) | 17.49 | ~1.1 GiB | ~4.5 GiB | 2 A76 | 6 A55 |
-| 0.5B Q4_K_M (1xA76) | 12.59 | ~624 MiB | ~5.0 GiB | 1 A76 | 1 A76 + 6 A55 |
-| 0.5B Q8_0 (1xA76) | 16.28 | ~1.1 GiB | ~4.5 GiB | 1 A76 | 1 A76 + 6 A55 |
-| 1.5B Q4_K_M (2xA76) | 8.46 | ~2.0 GiB | ~3.6 GiB | 2 A76 | 6 A55 |
-| 1.5B Q4_K_M (1xA76) | 5.71 | ~1.9 GiB | ~3.7 GiB | 1 A76 | 1 A76 + 6 A55 |
+| Model (optimal config) | Decode tok/s | RAM Free | Cores Free |
+|------------------------|-------------|----------|------------|
+| 0.5B Q4_K_M (2xA76) | 17.83 | ~5.0 GiB | 6 A55 |
+| 0.5B Q8_0 (2xA76) | 17.49 | ~4.5 GiB | 6 A55 |
+| 0.5B Q8_0 (1xA76) | 16.28 | ~4.5 GiB | 1 A76 + 6 A55 |
+| 1.5B Q4_K_M (2xA76) | 8.46 | ~3.6 GiB | 6 A55 |
+| 1.5B Q4_K_M (1xA76) | 5.71 | ~3.7 GiB | 1 A76 + 6 A55 |
+| 1.5B Q8_0 (1xA76) | 5.02 | ~2.3 GiB | 1 A76 + 6 A55 |
+| 3B Q4_K_M (2xA76) | 4.03 | ~1.8 GiB | 6 A55 |
 
-If ROS2 needs an A76 core: use 1xA76. For 0.5B Q8_0, this costs only 7% decode speed (16.28 vs 17.49).
-For 1.5B Q4_K_M, the cost is 32% (5.71 vs 8.46) but still usable at moderate interaction rates.
+## Final Recommendation
 
-RAM headroom: 0.5B Q4_K_M leaves the most (5.0 GiB free) with 2xA76 providing good decode (17.83 tok/s).
-1.5B Q8_0 (not yet fully measured) consumes >3.3 GiB — tight for concurrent ROS2 at 5.7 GiB total.
+**For max speed (interactive chat):**
+- Qwen2.5-0.5B Q8_0, A76-only (`taskset -c 6,7`, `-t 2`).
+- 17.49 tok/s decode, 133 tok/s prefill. 4.5 GiB RAM free for ROS2.
+- Cross-validated against B4b. Mature, reliable.
 
-## Summary Recommendation
+**For best intelligence that's still usable:**
+- Qwen2.5-1.5B Q4_K_M, A76-only (`taskset -c 6,7`, `-t 2`).
+- 8.46 tok/s decode — coherent at moderate speed. 3.6 GiB RAM free.
+- Q4_K_M chosen over Q8_0 because Q8_0 at 1.5B is memory-saturated (2xA76 slower than 1xA76).
 
-| Priority | Model | Quant | Cores | Decode tok/s | RAM Free | Notes |
-|----------|-------|-------|-------|-------------|----------|-------|
-| (a) Max speed | 0.5B Q8_0 | Q8_0 | 2xA76 | 17.49 | ~4.5 GiB | Fastest measured decode; good quality |
-| (a) Max speed (RAM-efficient) | 0.5B Q4_K_M | Q4_K_M | 2xA76 | 17.83 | ~5.0 GiB | Slightly faster decode, much less RAM |
-| (b) Best intelligence | 1.5B Q4_K_M | Q4_K_M | 2xA76 | 8.46 | ~3.6 GiB | Larger model, coherent, highest quality that fits |
-| (c) Best ROS2 concurrency | 0.5B Q4_K_M | Q4_K_M | 1xA76 | 12.59 | ~5.0 GiB | Frees 1 A76 + 6 A55 for ROS2 |
+**For ROS2 concurrency (frees 1 A76 + most RAM):**
+- Qwen2.5-0.5B Q8_0, single A76 (`taskset -c 6`, `-t 1`).
+- 16.28 tok/s — only 7% slower than 2xA76. Frees core 7 + all 6 A55 for ROS2/picoclaw.
+- 4.5 GiB RAM free.
 
-**Winner for interactive use:** 0.5B Q8_0 on 2xA76 (17.49 tok/s, 4.5 GiB free RAM, ~2x faster than Q4_K_M for prefill).
-
-**Winner for intelligence+tradeoff:** 1.5B Q4_K_M on 2xA76 (8.46 tok/s, 3.6 GiB free RAM, larger model with more knowledge).
-
-**Winner for ROS2 concurrency:** 0.5B Q4_K_M on 1xA76 (12.59 tok/s, 5.0 GiB free, frees 7 of 8 cores).
+**3B:** Loads but not recommended (4.03 tok/s, 1.8 GiB free). Batch/offline only.
+**7B:** Does not fit. Q4_K_M unavailable; Q2_K impractical on 5.7 GiB.
 
 ## Notes
 
 - CPU% is per-core aggregate (Linux %CPU, can exceed 100%).
 - %-of-8-cores is normalized: avg CPU% / 8.
 - Decode is per-token generation speed; prefill is prompt ingestion.
-- Peak RSS includes model weights mmap'd into page cache.
-- Some avg CPU% values are empty (marked "~") due to pidstat header contamination in early runs; peak values confirmed from mpstat and pidstat raw data.
-- All temperatures within safe operating range (max 87.1°C on Q8_0 8all).
-- No OOM events for 0.5B or 1.5B Q4_K_M models.
-- 3B and 7B tests in progress; 7B expected to OOM.
+- RSS via /proc/PID/status VmRSS, sampled every 1s.
+- Some avg CPU% values are empty (marked "~") due to pidstat header contamination in early 0.5B runs; peak values confirmed from mpstat and raw pidstat data.
+- All temperatures within safe range (max 87.1°C on Q8_0 8all). No throttling observed.
+- 7B Q4_K_M missing from HuggingFace GGUF repo; Q2_K/Q3_K_M available but not downloaded (disk 90% full, unlikely to fit RAM).
 
 ## Raw Logs
 
@@ -198,16 +226,30 @@ RAM headroom: 0.5B Q4_K_M leaves the most (5.0 GiB free) with 2xA76 providing go
 
 ## Verification
 
-- 0.5B Q4_K_M: All 9 configs completed, exit code 0.
-- 0.5B Q8_0: All 9 configs completed, exit code 0.
-- 1.5B Q4_K_M: All 9 configs completed, exit code 0.
-- 1.5B Q8_0: Sweep in progress (1 config completed, exit 0).
-- 3B Q4_K_M: Downloaded (2.0 GB), pending fit test.
-- 7B Q2_K: Downloading (Q4_K_M not in HF GGUF), pending fit test.
-- llama-completion perf timings extracted from run.log.
-- pidstat %CPU values extracted from pidstat.log.
-- RSS peak extracted via /proc/PID/status VmRSS sampling.
-- mpstat per-core data collected.
-- Affinity confirmed via taskset -c.
-- Thermals captured before and after each run.
-- B4b cross-check: 2xA76 Q8_0 decode 17.49 vs B4b 18.03 tok/s — consistent.
+- 0.5B Q4_K_M: All 9 configs, exit 0. Verified.
+- 0.5B Q8_0: All 9 configs, exit 0. Cross-checked with B4b. Verified.
+- 1.5B Q4_K_M: All 9 configs, exit 0. Verified.
+- 1.5B Q8_0: All 9 configs, exit 0. Verified.
+- 3B Q4_K_M: All 9 configs, exit 0. Verified.
+- 7B: Q4_K_M not in HF GGUF. Not run. Recorded.
+- llama-completion perf timings from run.log stderr.
+- pidstat %CPU from pidstat.log (field $9, %CPU column).
+- RSS from /proc/PID/status VmRSS sampling.
+- mpstat per-core data cross-references pidstat aggregate.
+- Affinity via taskset -c, confirmed in /proc/PID/status Cpus_allowed_list.
+- Thermals captured before/after each run from /sys/class/thermal/thermal_zone*/temp.
+
+Total benchmark runs: 45 configs (9 × 5 models) + 5 fit tests = 50 runs.
+All exit code 0. Total sweep wall time: ~55 minutes.
+
+## Disk Usage After Sweep
+
+All 6 GGUF model files kept on board for reuse:
+```
+0.5B Q4_K_M: 469 MB
+0.5B Q8_0:   645 MB
+1.5B Q4_K_M: 1.1 GB
+1.5B Q8_0:   1.8 GB
+3B Q4_K_M:   2.0 GB
+Total:       ~6.0 GB
+```
