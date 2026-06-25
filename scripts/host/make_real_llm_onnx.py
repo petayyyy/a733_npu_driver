@@ -582,6 +582,265 @@ def initializer_bytes(model: onnx.ModelProto) -> int:
     return total
 
 
+def build_block_initializers(
+    reader: SafeTensorReader,
+    config: dict[str, Any],
+    seq: int,
+    layer: int,
+) -> list[onnx.TensorProto]:
+    dim = int(config["hidden_size"])
+    n_heads = int(config["num_attention_heads"])
+    n_kv_heads = int(config.get("num_key_value_heads", n_heads))
+    head_dim = dim // n_heads
+    kv_repeat = n_heads // n_kv_heads
+    theta = float(config.get("rope_theta", 10000.0))
+    eps = float(config.get("rms_norm_eps", 1e-5))
+    inter = int(config["intermediate_size"])
+
+    rope_cos, rope_sin = rope_tables(seq, head_dim, theta)
+    hf = f"model.layers.{layer}"
+    prefix = f"layer{layer}"
+
+    return [
+        f32_tensor("eps", np.array([eps], dtype=np.float32)),
+        f32_tensor("scale_attn", np.array([1.0 / np.sqrt(head_dim)], dtype=np.float32)),
+        f32_tensor("causal_mask", np.triu(np.full((1, 1, seq, seq), -10000.0, dtype=np.float32), k=1)),
+        f32_tensor("rope_cos", rope_cos),
+        f32_tensor("rope_sin", rope_sin),
+        f32_tensor(f"{prefix}_attn_gamma", reshape_gamma(reader.tensor(f"{hf}.input_layernorm.weight"))),
+        f32_tensor(f"{prefix}_mlp_gamma", reshape_gamma(reader.tensor(f"{hf}.post_attention_layernorm.weight"))),
+        f32_tensor(f"{prefix}_wq", linear_weight(reader.tensor(f"{hf}.self_attn.q_proj.weight"))),
+        f32_tensor(f"{prefix}_wk", linear_weight(reader.tensor(f"{hf}.self_attn.k_proj.weight"))),
+        f32_tensor(f"{prefix}_wv", linear_weight(reader.tensor(f"{hf}.self_attn.v_proj.weight"))),
+        f32_tensor(f"{prefix}_bq", reader.optional_tensor(f"{hf}.self_attn.q_proj.bias", (dim,))),
+        f32_tensor(f"{prefix}_bk", reader.optional_tensor(f"{hf}.self_attn.k_proj.bias", (n_kv_heads * head_dim,))),
+        f32_tensor(f"{prefix}_bv", reader.optional_tensor(f"{hf}.self_attn.v_proj.bias", (n_kv_heads * head_dim,))),
+        f32_tensor(f"{prefix}_wo", linear_weight(reader.tensor(f"{hf}.self_attn.o_proj.weight"))),
+        f32_tensor(f"{prefix}_w_gate", linear_weight(reader.tensor(f"{hf}.mlp.gate_proj.weight"))),
+        f32_tensor(f"{prefix}_w_up", linear_weight(reader.tensor(f"{hf}.mlp.up_proj.weight"))),
+        f32_tensor(f"{prefix}_w_down", linear_weight(reader.tensor(f"{hf}.mlp.down_proj.weight"))),
+        i64_tensor("shape_q", [BATCH, seq, n_heads, head_dim]),
+        i64_tensor("shape_kv", [BATCH, seq, n_kv_heads, head_dim]),
+        i64_tensor("shape_kv_expand", [BATCH, n_kv_heads, 1, seq, head_dim]),
+        i64_tensor("kv_tile_repeats", [1, 1, kv_repeat, 1, 1]),
+        i64_tensor("shape_heads", [BATCH, n_heads, seq, head_dim]),
+        i64_tensor("shape_hidden", [BATCH, seq, dim]),
+        i64_tensor("slice_start_0", [0]),
+        i64_tensor("slice_start_half", [head_dim // 2]),
+        i64_tensor("slice_end_half", [head_dim // 2]),
+        i64_tensor("slice_end_head", [head_dim]),
+        i64_tensor("slice_axis_last", [3]),
+        i64_tensor("slice_step_1", [1]),
+    ]
+
+
+def build_single_block_onnx(
+    model_dir: Path,
+    output_dir: Path,
+    seq: int,
+    layer: int,
+) -> None:
+    config = read_config(model_dir / "config.json")
+    dim = int(config["hidden_size"])
+    layers = int(config["num_hidden_layers"])
+    if layer < 0 or layer >= layers:
+        raise ValueError(f"layer {layer} out of range [0, {layers - 1}]")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    nodes: list[onnx.NodeProto] = []
+    hidden_input = "hidden_in"
+    hidden_output = add_decoder_layer(nodes, f"layer{layer}", hidden_input, False)
+
+    inputs = [helper.make_tensor_value_info("hidden_in", TensorProto.FLOAT, [BATCH, seq, dim])]
+    outputs = [helper.make_tensor_value_info(hidden_output, TensorProto.FLOAT, [BATCH, seq, dim])]
+
+    reader = SafeTensorReader(model_dir / "model.safetensors")
+    try:
+        initializers = build_block_initializers(reader, config, seq, layer)
+        graph = helper.make_graph(nodes, f"qwen_block_l{layer}_w{seq}", inputs, outputs, initializers)
+    finally:
+        reader.close()
+
+    model = helper.make_model(graph, producer_name="a733_npu_driver", opset_imports=[helper.make_opsetid("", 11)])
+    model.ir_version = 7
+    onnx.checker.check_model(model)
+
+    onnx_path = output_dir / "real_llm.onnx"
+    onnx.save(model, onnx_path)
+    init_bytes = initializer_bytes(model)
+
+    (output_dir / "inputs_outputs.txt").write_text(
+        f"--inputs hidden_in --input-size-list '1 32 896' --outputs {hidden_output}\n",
+        encoding="ascii",
+    )
+    (output_dir / "model_info.json").write_text(
+        json.dumps({
+            "mode": "single_block",
+            "layer": layer,
+            "seq_len": seq,
+            "hidden_size": dim,
+            "onnx_path": str(onnx_path),
+            "initializer_bytes": init_bytes,
+        }, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    print(f"wrote single block L={layer} to {onnx_path} ({init_bytes} init bytes)")
+
+
+def build_embedding_onnx(
+    model_dir: Path,
+    output_dir: Path,
+    seq: int,
+    lm_head_chunk_size: int | None,
+) -> None:
+    config = read_config(model_dir / "config.json")
+    vocab = int(config["vocab_size"])
+    dim = int(config["hidden_size"])
+    chunks = vocab_chunks(vocab, lm_head_chunk_size)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    nodes: list[onnx.NodeProto] = []
+    reader = SafeTensorReader(model_dir / "model.safetensors")
+    try:
+        token_embed = reader.tensor("model.embed_tokens.weight")
+    finally:
+        reader.close()
+
+    initializers: list[onnx.TensorProto] = []
+    masked_chunks: list[str] = []
+    for index, (start, end) in enumerate(chunks):
+        initializers.extend([
+            f32_tensor(f"token_embed_chunk{index}", token_embed[start:end]),
+            i32_tensor(f"token_chunk{index}_start", [start]),
+            i32_tensor(f"token_chunk{index}_start_minus_one", [start - 1]),
+            i32_tensor(f"token_chunk{index}_end", [end]),
+        ])
+        relative = f"token_chunk{index}_relative"
+        relative_safe = f"token_chunk{index}_relative_safe"
+        gathered = f"token_chunk{index}_gathered"
+        ge_start = f"token_chunk{index}_ge_start"
+        lt_end = f"token_chunk{index}_lt_end"
+        mask_bool = f"token_chunk{index}_mask_bool"
+        mask_float = f"token_chunk{index}_mask_float"
+        mask = f"token_chunk{index}_mask"
+        masked = f"token_chunk{index}_masked"
+        nodes.extend([
+            helper.make_node("Sub", ["token_ids", f"token_chunk{index}_start"], [relative], name=f"token_chunk{index}_sub_start"),
+            helper.make_node("Greater", ["token_ids", f"token_chunk{index}_start_minus_one"], [ge_start], name=f"token_chunk{index}_ge_start"),
+            helper.make_node("Less", ["token_ids", f"token_chunk{index}_end"], [lt_end], name=f"token_chunk{index}_lt_end"),
+            helper.make_node("And", [ge_start, lt_end], [mask_bool], name=f"token_chunk{index}_mask_bool"),
+            helper.make_node("Where", [mask_bool, relative, "token_zero"], [relative_safe], name=f"token_chunk{index}_safe_index"),
+            helper.make_node("Gather", [f"token_embed_chunk{index}", relative_safe], [gathered], name=f"token_gather_chunk{index}", axis=0),
+            helper.make_node("Cast", [mask_bool], [mask_float], name=f"token_chunk{index}_mask_float", to=TensorProto.FLOAT),
+            helper.make_node("Reshape", [mask_float, "shape_token_mask"], [mask], name=f"token_chunk{index}_mask_reshape"),
+            helper.make_node("Mul", [gathered, mask], [masked], name=f"token_chunk{index}_apply_mask"),
+        ])
+        masked_chunks.append(masked)
+
+    initializers.extend([
+        i64_tensor("shape_token_mask", [BATCH, seq, 1]),
+        i32_tensor("token_zero", [0]),
+    ])
+    hidden = masked_chunks[0]
+    for index, masked in enumerate(masked_chunks[1:], start=1):
+        out = f"hidden_emb_chunked_sum{index}"
+        nodes.append(helper.make_node("Add", [hidden, masked], [out], name=f"token_chunk{index}_accumulate"))
+        hidden = out
+
+    inputs = [helper.make_tensor_value_info("token_ids", TensorProto.INT32, [BATCH, seq])]
+    outputs = [helper.make_tensor_value_info(hidden, TensorProto.FLOAT, [BATCH, seq, dim])]
+    graph = helper.make_graph(nodes, f"qwen_embedding_w{seq}", inputs, outputs, initializers)
+    model = helper.make_model(graph, producer_name="a733_npu_driver", opset_imports=[helper.make_opsetid("", 11)])
+    model.ir_version = 7
+    onnx.checker.check_model(model)
+
+    onnx_path = output_dir / "real_llm.onnx"
+    onnx.save(model, onnx_path)
+    init_bytes = initializer_bytes(model)
+    (output_dir / "inputs_outputs.txt").write_text(
+        f"--inputs token_ids --input-size-list {seq} --outputs {hidden}\n", encoding="ascii")
+    print(f"wrote embedding stage to {onnx_path} ({init_bytes} init bytes)")
+
+
+def build_final_onnx(
+    model_dir: Path,
+    output_dir: Path,
+    seq: int,
+    lm_head_chunk_size: int | None,
+) -> None:
+    config = read_config(model_dir / "config.json")
+    dim = int(config["hidden_size"])
+    vocab = int(config["vocab_size"])
+    eps = float(config.get("rms_norm_eps", 1e-5))
+    chunks = vocab_chunks(vocab, lm_head_chunk_size)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    nodes: list[onnx.NodeProto] = []
+    reader = SafeTensorReader(model_dir / "model.safetensors")
+    try:
+        token_embed = reader.tensor("model.embed_tokens.weight")
+        final_gamma = reader.tensor("model.norm.weight")
+    finally:
+        reader.close()
+
+    initializers: list[onnx.TensorProto] = [
+        f32_tensor("final_rms_gamma", reshape_gamma(final_gamma)),
+        f32_tensor("eps", np.array([eps], dtype=np.float32)),
+        i64_tensor("slice_start_0", [0]),
+        i64_tensor("slice_step_1", [1]),
+        i64_tensor("last_token_start", [seq - 1]),
+        i64_tensor("last_token_end", [seq]),
+        i64_tensor("sequence_axis", [1]),
+        i64_tensor("slice_start_half", [dim // 2]),
+    ]
+
+    final = add_rms_norm(nodes, "final_rms", "hidden_in", "final_rms_gamma")
+    nodes.append(helper.make_node(
+        "Slice", [final, "last_token_start", "last_token_end", "sequence_axis", "slice_step_1"],
+        ["final_last_token"], name="slice_last_hidden"))
+
+    logit_output_names: list[str] = []
+    for index, (start, end) in enumerate(chunks):
+        embed_chunk = f"lm_head_embed_chunk{index}"
+        head_chunk = f"lm_head_chunk{index}"
+        logits_chunk = f"logits_chunk{index}"
+        initializers.extend([
+            i64_tensor(f"lm_head_chunk{index}_start", [start]),
+            i64_tensor(f"lm_head_chunk{index}_end", [end]),
+        ])
+        nodes.extend([
+            helper.make_node("Slice", ["token_embed", f"lm_head_chunk{index}_start", f"lm_head_chunk{index}_end", "embedding_axis", "slice_step_1"], [embed_chunk], name=f"slice_lm_head_chunk{index}"),
+            helper.make_node("Transpose", [embed_chunk], [head_chunk], name=f"tie_lm_head_transpose_chunk{index}", perm=[1, 0]),
+            helper.make_node("MatMul", ["final_last_token", head_chunk], [logits_chunk], name=f"logits_chunk{index}"),
+        ])
+        logit_output_names.append(logits_chunk)
+
+    if len(chunks) > 1:
+        initializers.append(i64_tensor("embedding_axis", [0]))
+        nodes.append(helper.make_node("Concat", logit_output_names, ["logits"], name="concat_logits_chunks", axis=2))
+        logit_name = "logits"
+        logit_shape = [BATCH, 1, vocab]
+    else:
+        logit_name = logit_output_names[0]
+        logit_shape = [BATCH, 1, vocab]
+
+    inputs = [helper.make_tensor_value_info("hidden_in", TensorProto.FLOAT, [BATCH, seq, dim])]
+    # Add token_embed as initializer
+    initializers.append(f32_tensor("token_embed", token_embed))
+    outputs = [helper.make_tensor_value_info(logit_name, TensorProto.FLOAT, logit_shape)]
+    graph = helper.make_graph(nodes, f"qwen_final_w{seq}", inputs, outputs, initializers)
+    model = helper.make_model(graph, producer_name="a733_npu_driver", opset_imports=[helper.make_opsetid("", 11)])
+    model.ir_version = 7
+    onnx.checker.check_model(model)
+
+    onnx_path = output_dir / "real_llm.onnx"
+    onnx.save(model, onnx_path)
+    init_bytes = initializer_bytes(model)
+    (output_dir / "inputs_outputs.txt").write_text(
+        f"--inputs hidden_in --input-size-list 32,896 --outputs {logit_name}\n", encoding="ascii")
+    print(f"wrote final stage to {onnx_path} ({init_bytes} init bytes)")
+
+
 def build_model(
     model_dir: Path,
     output_dir: Path,
@@ -796,9 +1055,42 @@ def main() -> None:
         help="split the token embedding table into vocab chunks and gather from masked chunks",
     )
     parser.add_argument("--no-check", action="store_true", help="skip onnx.checker for very large debug builds")
+    parser.add_argument(
+        "--export-block",
+        type=int,
+        help="export a single decoder block layer N (0-indexed) as a standalone ONNX",
+    )
+    parser.add_argument(
+        "--export-embedding",
+        action="store_true",
+        help="export token embedding stage as standalone ONNX (tokens -> hidden)",
+    )
+    parser.add_argument(
+        "--export-final",
+        action="store_true",
+        help="export final RMSNorm + lm_head stage as standalone ONNX (hidden -> logits)",
+    )
     args = parser.parse_args()
 
     config = read_config(args.model_dir / "config.json")
+
+    if args.export_block is not None:
+        build_single_block_onnx(
+            args.model_dir,
+            args.output_dir,
+            args.seq_len,
+            args.export_block,
+        )
+        return
+
+    if args.export_embedding:
+        build_embedding_onnx(args.model_dir, args.output_dir, args.seq_len, args.lm_head_chunk_size)
+        return
+
+    if args.export_final:
+        build_final_onnx(args.model_dir, args.output_dir, args.seq_len, args.lm_head_chunk_size)
+        return
+
     tokens = parse_tokens(args.tokens, args.seq_len, int(config["vocab_size"])) if args.tokens else None
     build_model(
         args.model_dir,

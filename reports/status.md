@@ -1140,9 +1140,34 @@ workspace artifacts.
     - ACUITY quantize-table serialization: full Qwen chunked ONNX produces
       0-byte `.quantize` file (T4/T7/Q1)
 
+- Task Q2-qwen-block-nbg started. Gate 1 PASSED; Gate 2 in progress.
+  - Q1 results triggered Q2 automatically (both Q1 gates failed to export).
+  - Gate 1 -- Single Block: **PASSED**.
+    - Extended `make_real_llm_onnx.py` with `--export-block N`,
+      `--export-embedding`, and `--export-final` modes.
+    - Exported Qwen2.5-0.5B block 0 as standalone ONNX (57 MB initializers,
+      input 1x32x896 float32, output 1x32x896 float32).
+    - ACUITY import requires `--input-size-list 32,896` (comma-separated) for
+      3D tensor inputs; space-separated format fails.
+    - Int16 NBG compiled successfully: `network_binary.nb` 22.6 MB,
+      simulator create 135ms, verify 8.9s, run 199.7ms, `Error(0),Warning(0)`.
+    - Host quality: cosine **0.999965** (vs ONNX Runtime FP32), max abs diff
+      0.0144. Far above the >0.95 gate.
+    - Result: the monolithic NBG's vnn_VerifyGraph -3 IS an aggregate-graph
+      limit. Per-block NBGs sidestep it.
+  - Gate 2 -- Chain 24 Blocks:
+    - Generated all 26 stage ONNX files (24 blocks + embedding + final).
+    - Block compilation: block 0 compiled (22.6 MB NBG), block 1 compiling.
+    - Estimated total NBG size: ~1,063 MB (543 MB blocks + 260 MB emb + 260 MB final).
+    - Next: compile remaining blocks, implement chained runner with VIPLite
+      Multi-Graph, port to Orange Pi at 192.168.31.225.
+  - Report added: `reports/q2-qwen-block-nbg.md`.
+  - Changes: `scripts/host/make_real_llm_onnx.py` (+150 lines for block/emb/final export).
+
 ## Next Gate
 
-Hybrid CPU-LLM + NPU-vision is the path for Qwen2.5-0.5B. The NPU remains
-valid for vision encoders (MobileCLIP-S0 proven at 22.6ms on NPU) and for
-smaller LLMs (SmolLM2-135M W=32 int16 proven coherent on Orange Pi NPU at
-21 tok/s). Qwen2.5-0.5B decode on CPU is the viable path documented in B4b.
+Q2 Gate 2 continuation: compile all 26 NBGs, implement Multi-Graph chained runner,
+validate full-model coherence on host then Orange Pi.
+
+NPU-vision remains valid (MobileCLIP-S0 at 22.6ms). SmolLM2-135M int16 runs on
+Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM path.
