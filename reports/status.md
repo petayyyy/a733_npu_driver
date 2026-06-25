@@ -1366,3 +1366,22 @@ Q2 Qwen block-chain and V1 CPU VLM remain the active deliverables.
 NPU-vision validated for both MobileCLIP-S0 (22.6ms) and SmolVLM SigLIP (5,959ms).
 SmolLM2-135M int16 runs on Orange Pi NPU at 21 tok/s. Hybrid (NPU vision → CPU LLM)
 is the recommended production path for SmolVLM image chat on this silicon.
+
+- Task V4b-cli-tools completed on Orange Pi Zero 3W at `192.168.31.225`.
+  SUCCESS GATE PASSED: all CLI tools verified working on hardware.
+  - Removed web app remnants (`app/static/`, `app/templates/`) from Orange Pi board.
+  - Fixed em-dash Unicode encoding (`—` → `--`) in `app/vlm_chat.py`,
+    `app/llm_chat.py`, `app/README.md`, and `docs/09-cli-tools.md` sample outputs
+    for terminal compatibility (em-dash rendered as `�` on board terminal).
+  - Verified `python3 app/vlm_chat.py --image test_images/dog.jpg -q "..."` returns
+    accurate answers (CPU backend, SmolVLM-256M Q8_0, ~52 tok/s).
+  - Verified `python3 app/vlm_chat.py --image test_images/dog.jpg -q "..." --backend npu`
+    works: NPU vision encode 5,959 ms, CPU LLM decode ~46.5 tok/s, accurate answer.
+    Graceful fallback to CPU when `--cpu-only` or when `/dev/vipcore`/NBG missing.
+  - Verified `python3 app/llm_chat.py -q "..."` with qwen-1.5b (8.5 tok/s),
+    qwen-0.5b (18 tok/s), and qwen-3b listed as experimental.
+    All models use A76 cores (6-7) by default, `--chat-template chatml`.
+  - Verified `app/README.md` and `docs/09-cli-tools.md` are accurate with
+    copy-pasteable install/run commands for a fresh Orange Pi Zero 3W.
+  - Board: no web server, no browser UI — pure CLI over SSH. RAM/cores info printed.
+  - Commit: `f1c022d` — V4b: fix em-dash encoding in CLI tools for terminal compatibility.
