@@ -1,6 +1,7 @@
 logs/
 models/
 work/
+build/
 docker_images*/
 *.log
 *.tmp
@@ -11,6 +12,8 @@ docker_images*/
 *.tar
 *.tar.gz
 *.zip
+*.gguf
+*.safetensors
 __pycache__/
 *.py[cod]
 _tree.txt
