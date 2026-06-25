@@ -22,7 +22,8 @@ Zero 3W (6 GB RAM).
 | Long-context retrieval | Qwen2.5-0.5B Q8_0 | CPU (2×A76) | 16k KV-cache | 2.2 decode | [06](06-cpu-baseline.md) |
 | **Image chat (recommended VLM)** | **SmolVLM-256M Q8_0** | CPU (2×A76) | auto | **53** | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | Higher-detail image chat | SmolVLM-500M Q8_0 | CPU (2×A76) | auto | 22 | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
-| VLM vision offload | MobileCLIP-S0 | NPU | 1×256×256 | 22.6 ms | [05](05-run-vlm-npu.md) |
+| VLM vision offload (SmolVLM) | SmolVLM SigLIP int16 | NPU | 1×512×512 | 5,959 ms | [05](05-run-vlm-npu.md) |
+| VLM vision offload (MobileCLIP) | MobileCLIP-S0 | NPU | 1×256×256 | 22.6 ms | [05](05-run-vlm-npu.md) |
 | NPU-only more context | SmolLM2-135M W=64 int16 | NPU | 64 fixed | 14 | [03](03-run-llm-npu.md) |
 
 ## NPU configs (all verified)

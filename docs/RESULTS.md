@@ -43,6 +43,10 @@ Notes:
   Every config fails. (See [reports/t8](../reports/t8-qwen-int16-port.md) through
   [reports/q1](../reports/q1-qwen-int8-gates.md).)
 - At W≥128 the model has no real context memory; performance declines sharply.
+- **V2b SmolVLM vision-on-NPU**: SigLIP encoder NBG (271 MB) runs on NPU at
+  5,959 ms/inference (verified: `cid=0x1000003b`, `vpm run ret=0`).
+  Conv→Reshape+MatMul rewrite bypassed ACUITY Conv crash. End-to-end accuracy
+  pending proper image calibration. See [v2b](../reports/v2b-smolvlm-vision-npu-retry.md).
 
 ---
 

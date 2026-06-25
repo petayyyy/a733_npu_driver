@@ -59,17 +59,20 @@ external-data ONNX graph.
 
 Report: [b1b](../reports/b1b-benchmark-matrix.md)
 
-## Blocker 4 — SmolVLM SigLIP vision encoder on NPU
+## Blocker 4 — SmolVLM SigLIP vision encoder on NPU (PARTIALLY RESOLVED)
 
 SmolVLM-256M SigLIP encoder (Idefics3 wrapper): ONNX exports (357 MB,
 1×3×512×512 → 1×64×576) but ACUITY 6.30.22 crashes at Conv shape inference
 (`_conv_shape`, smart_toolkit.py:1571 — IndexError) on the patch embedding
 Conv (kernel=16, stride=16, in=3, out=768).
 
-NonZero op removal succeeded (verified ONNX RT cosine 1.00000000). Opset
-downgrade (17→15) didn't help. The Conv block remains.
+**V2b update**: Conv→Reshape+MatMul rewrite **succeeded**. NBG exports (271 MB,
+Error 0), runs on Orange Pi NPU at 5.96 sec/inference (verified:
+`cid=0x1000003b`, `vpm run ret=0`). End-to-end accuracy pending proper image
+calibration (current NBG used random-noise calibration). Not marked resolved
+until calibration fixed and VLM answers validated.
 
-Report: [v2](../reports/v2-hybrid-vlm-npu-offload.md)
+Reports: [v2](../reports/v2-hybrid-vlm-npu-offload.md), [v2b](../reports/v2b-smolvlm-vision-npu-retry.md)
 
 ## Blocker 5 — No KV-cache
 

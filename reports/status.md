@@ -1267,3 +1267,36 @@ Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM pat
 
 V1 gate passed: SmolVLM-256M-Instruct Q8_0 CPU VLM deliverable.
 V2 gate blocked: SmolVLM vision encoder cannot convert to NBG (ACUITY NonZero + Conv).
+
+- Task V2b-smolvlm-vision-npu-retry: Attempt 1 (Conv→Reshape+MatMul) PASSED.
+  - Rewrote SigLIP patch-embedding Conv2d (kernel=16, stride=16, in=3, out=768)
+    as Reshape+Transpose+MatMul operations to bypass ACUITY `_conv_shape` crash.
+  - Verified rewritten ONNX vs PyTorch: cosine 1.00000000, max diff 0.00005674.
+    Zero Conv ops, zero NonZero ops in final ONNX.
+  - ONNX exported (opset 17, 356.9 MB). ONNX Runtime verified (output matches).
+  - ACUITY int16 conversion: import SUCCESS, quantize SUCCESS, inference SUCCESS,
+    export **Error(0), Warning(0)**. NBG: 271.2 MB.
+    Simulator: create 1,015ms, verify 995,821ms (16.6 min), one run 158,230ms (2.6 min).
+  - NBG metadata: input int16 DFP fl=12 (1×3×512×512), output int16 DFP fl=9 (1×64×576),
+    memory pool 21 MB.
+  - Uploaded and ran on Orange Pi NPU at `192.168.31.225`:
+    `cid=0x1000003b`, `vpm run ret=0`, create 240ms, prepare 12.3s,
+    **inference 5,959 ms** (~6.0 sec/image), output 36,864 values (64×576), verified.
+  - Known issue: calibration dataset used random noise (range [-5,5]), not real
+    SigLIP-normalized images (range [-1,1]). Input quantization uses only ~22%
+    of dynamic range. Rebuild with real-image calibration needed for accuracy gate.
+  - End-to-end VLM accuracy (NPU embeddings → CPU LLM) pending calibration rebuild
+    and embedding injection into llama.cpp.
+  - Report added: `reports/v2b-smolvlm-vision-npu-retry.md`.
+  - Updated docs: `blockers.md`, `RESULTS.md`, `configurations.md`.
+  - Host script: `scripts/host/export_smolvlm_vision_v2b.py`.
+
+## Next Gate
+
+SmolVLM vision-on-NPU toolchain path proven (Conv→MatMul rewrite, NBG exports,
+runs on Orange Pi NPU at 6.0 sec/image). Remaining: rebuild NBG with real-image
+calibration, wire NPU embeddings into llama.cpp SmolVLM decoder, validate V1-level
+answer accuracy. Q2 Qwen block-chain and V1 CPU VLM remain the active deliverables.
+
+NPU-vision validated for both MobileCLIP-S0 (22.6ms) and SmolVLM SigLIP (5,959ms).
+SmolLM2-135M int16 runs on Orange Pi NPU at 21 tok/s.
