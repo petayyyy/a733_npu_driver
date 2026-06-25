@@ -150,21 +150,66 @@ The host gate is cleared; the remaining risk is the runtime's ability to keep
 
 - `scripts/host/make_real_llm_onnx.py`: Added `--export-block N`,
   `--export-embedding`, `--export-final` modes for per-stage ONNX export.
-- `scripts/host/convert_onnx_to_nbg.sh`: Added `perchannel_int16` quant type
-  (from Q1, kept for reference).
-- `scripts/host/q2_simulate_int16_chain.py`: New. Int16 chained simulation with
-  per-layer cosine drift tracking and autoregressive decode loop.
+- `scripts/host/convert_onnx_to_nbg.sh`: Added `perchannel_int16` quant type.
+- `scripts/host/q2_simulate_int16_chain.py`: New. Int16 chained simulation.
+- `scripts/host/prepare_chain_input.py`: New. Generates block inputs from FP32 oracle.
+- `scripts/host/prepare_all_block_inputs.py`: New. Batch input generation.
+- `scripts/board/npu_chain_runner.c`: New. 2-NBG chain test.
+- `scripts/board/npu_full_chain_runner.c`: New. Full 26-stage chain runner.
 
 ## Logs
 
 - `logs/host/q2-gate1-block0-int16.log` - Block 0 full conversion
-- `logs/host/q2-gate1-block0-int16-v2.log` - Block 0 conversion v2 (with inputmeta fix)
-- `work/generated/q2_gate2a/q2_gate2a_simulation.json` - Gate 2A full results
+- `logs/host/q2-gate1-block0-int16-v2.log` - Block 0 conversion v2
+- `work/generated/q2_gate2a/q2_gate2a_simulation.json` - Gate 2A results
 - `work/generated/q2_gate2a_prompt/q2_gate2a_simulation.json` - Gate 2A prompt results
-- `logs/host/q2-gate2b-block1-int16-convert-retry1.log` - Block 1 ACUITY conversion
-- Board log: `logs/board/q2-gate2b-chain-test.log` - 2-NBG chain on Orange Pi
+- `logs/host/q2-gate2b-block1-int16-convert-retry1.log` - Block 1 conversion
+- Board log: `logs/board/q2-gate2b-chain-test.log` - 2-NBG chain
+- Board log: `logs/board/q2-gate2c-full-chain.log` - Full 26-stage chain
 
-## Gate 2B -- VIPLite Multi-Graph Chaining (PASSED)
+## Gate 2C -- Full 26-NBG Chain (MECHANICAL PASS, QUALITY FAILS)
+
+Date: 2026-06-25. Orange Pi Zero 3W at 192.168.31.225.
+
+### Method
+
+1. All 26 stages compiled to int16 NBG: 1 embedding + 24 decoder blocks + 1 final.
+   - Embedding: 272 MB (input int32 token_ids, output int16 hidden 1x32x896)
+   - Blocks: ~23 MB each (input/output int16 hidden 1x32x896)
+   - Final: 227 MB (input int16 hidden, output int16 logits 1x1x151936)
+   - Total NBG: **~1,063 MB**
+2. Built `scripts/board/npu_full_chain_runner.c`: loads all 26 networks via
+   `VIP_CREATE_NETWORK_FROM_FILE`, prepares them, chains embed→block0→...→block23→final.
+3. Deployed on Orange Pi (VIPLite 2.0.3.2, 5.7 GB RAM, 4.3 GB available).
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Stages loaded | **26** |
+| Chain compatible | **YES** (57,344 B per hidden state) |
+| First-step wall | **150,439 us** |
+| Mean decode wall | **151,762 us** |
+| **Decode tok/s** | **6.59** |
+| nbg_loaded_once | **1** |
+| Quality: generated tokens | 151981 x 6 (empty/invalid) |
+
+### Verdict
+
+**Mechanical PASS, quality FAILS.** The chain runs at 6.6 tok/s with stable timing,
+but all generated tokens are degenerate (empty strings). Root cause: int16 depth
+accumulation destroys coherence. Hidden states reach max 1592 forcing `dfp=4`
+(granularity 0.0625) on layers 4-20, and 24 chained quantize-dequantize cycles
+compound error beyond the simulation's prediction (cosine 0.975 on host vs total
+collapse on hardware).
+
+### Recommendation
+
+Qwen2.5-0.5B on NPU is **NOT viable** with int16 per-block chaining. The
+recommended path is hybrid CPU-LLM + NPU-vision:
+- SmolLM2-135M int16 works at 21 tok/s on NPU (verified, coherent)
+- Qwen2.5-0.5B Q8_0 runs at 18 tok/s on 2 A76 cores (verified)
+- MobileCLIP-S0 vision at 22.6ms on NPU (verified)
 
 Date: 2026-06-25. Orange Pi Zero 3W at 192.168.31.225.
 
