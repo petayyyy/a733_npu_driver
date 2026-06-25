@@ -59,6 +59,13 @@ Vendor tickets: **[docs/vendor-tickets.md](docs/vendor-tickets.md)**.
 | VIPLite | 2.0.3.2-AW-2024-08-30 | 2.0.3.2-AW-2024-08-30 |
 | `/dev/vipcore` | 199,0 | 199,0 |
 
+## Continue this project / hand-off
+
+> **[docs/import_chat.md](docs/import_chat.md)** — Import this into a new
+> Claude / Claude Code session to continue the project with full context.
+> Self-contained knowledge base with all verified numbers, blockers, and
+> building blocks.
+
 ## Start here
 
 1. **Set up the host** — [docs/01-setup-host.md](docs/01-setup-host.md)
