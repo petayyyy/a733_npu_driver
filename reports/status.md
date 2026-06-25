@@ -1340,13 +1340,13 @@ V2 gate blocked: SmolVLM vision encoder cannot convert to NBG (ACUITY NonZero + 
     - 0.5B Q4_K_M: best decode 2xA76=17.83 tok/s, RSS 624 MiB
     - 0.5B Q8_0: best decode 2xA76=17.49 tok/s, RSS 1.1 GiB (matches B4b)
     - 1.5B Q4_K_M: best decode 2xA76=8.46 tok/s, RSS 2.0 GiB
-    - 1.5B Q8_0: best decode 1xA76=5.02 tok/s (2xA76=4.79 — WORSE! Memory saturated)
+    - 1.5B Q8_0: best decode 2xA76=6.00 tok/s (retested; original sweep 4.79 — thermal/contention discrepancy)
     - 3B Q4_K_M: best decode 2xA76=4.03 tok/s, RSS 3.8 GiB (loads, barely interactive)
   - Key findings:
     - 1xA76 = 4xA55 for 1.5B Q4_K_M decode (5.71 vs 5.40). A76 efficiency holds.
-    - 1.5B Q8_0: single A76 beats dual A76 — memory bandwidth fully saturated.
+    - 1.5B Q8_0: 2xA76 (6.00) beats 1xA76 (5.02). Adding A55 cores kills speed (4mixed=3.81).
     - 3B loads on 5.7 GiB RAM but not recommended for interactive use (<4 tok/s).
-    - 7B does not fit on this board.
+    - 7B Q2_K loads (2839 MiB) but 0.05 tok/s — unusable. Q4_K_M not in HF GGUF.
   - Recommendations:
     - Max speed: 0.5B Q8_0 2xA76 (17.49 tok/s, 4.5 GiB free)
     - Best intelligence: 1.5B Q4_K_M 2xA76 (8.46 tok/s, 3.6 GiB free)

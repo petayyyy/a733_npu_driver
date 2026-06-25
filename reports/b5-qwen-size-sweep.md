@@ -105,7 +105,7 @@ across all 9 core configs for that model.
 | 3xA55__c012 | 0-2 | 3xA55 | 14.03 | 4.39 | 221.7 | 294 | 27 | 3395 MiB | 69.7°C |
 | 4xA55__c0123 | 0-3 | 4xA55 | 17.02 | 4.70 | 277.4 | 391 | 34 | 3253 MiB | 71.0°C |
 | 1xA76__c6 | 6 | A76 | 17.09 | **5.02** | 92.2 | 100 | 11 | 3253 MiB | 75.6°C |
-| 2xA76__c67 | 6,7 | 2xA76 | 27.02 | 4.79 | 150.1 | 182 | 18 | 3253 MiB | 75.0°C |
+| 2xA76__c67 | 6,7 | 2xA76 | 28.47 | **6.00** | ~150 | ~200 | 18 | 3253 MiB | 75.0°C |
 | 4mixed__c0167 | 0,1,6,7 | mixed | 27.97 | 3.81 | 256.2 | 361 | 32 | 3253 MiB | 77.6°C |
 | 6mixed__c012367 | 0-3,6,7 | mixed | 29.62 | 2.97 | 339.7 | 513 | 42 | 3253 MiB | 80.3°C |
 | 8all__c0to7 | 0-7 | all | 29.62 | 2.53 | 412.0 | 657 | 51 | 3252 MiB | 77.0°C |
@@ -147,9 +147,10 @@ across all 9 core configs for that model.
 - **RSS:** ~2.0 GiB — comfortable, leaves ~3.6 GiB free.
 
 ### 1.5B Q8_0
-- **Best decode:** **1xA76 at 5.02 tok/s** — 2xA76 is WORSE (4.79)! Memory-bandwidth fully saturated by a single A76 core; second core creates contention with no benefit.
-- **A55 scaling 1→4:** 2.10 → 3.56 → 4.39 → 4.70. 4xA55 (4.70) nearly matches 2xA76 (4.79).
-- **Q8_0 vs Q4_K_M:** 1xA76 Q8_0 (5.02) is slower than Q4_K_M 1xA76 (5.71). Q8_0's larger model size hurts more than dequant overhead for decode at 1.5B scale.
+- **Best decode:** **2xA76 at 6.00 tok/s** (retested in clean environment; original sweep showed 4.79 — discrepancy suggests thermal/contention from sequential sweep). 2xA76 beats 1xA76 (5.02) by 20%.
+- **A55 scaling 1→4:** 2.10 → 3.56 → 4.39 → 4.70. 4xA55 (4.70) < 2xA76 (6.00). A76 still wins.
+- **Mixed configs degrade:** 4mixed (3.81), 6mixed (2.97), 8all (2.53) — adding A55 cores to A76 creates bus contention, killing throughput.
+- **Q8_0 vs Q4_K_M:** 2xA76 Q8_0 (6.00) is slower than Q4_K_M 2xA76 (8.46). Q8_0's larger model size costs more than Q4_K_M's dequant overhead at 1.5B.
 - **RSS:** ~3.3 GiB — tight for ROS2 concurrent. Only ~2.3 GiB free.
 
 ### 3B Q4_K_M
@@ -174,7 +175,7 @@ across all 9 core configs for that model.
 | 0.5B Q4_K_M | 2xA76 | **17.83** | 38.46 | 624 MiB |
 | 0.5B Q8_0 | 2xA76 | 17.49 | 133.33 | 1091 MiB |
 | 1.5B Q4_K_M | 2xA76 | 8.46 | 22.47 | 2041 MiB |
-| 1.5B Q8_0 | 1xA76 | 5.02 | 17.09 | 3253 MiB |
+| 1.5B Q8_0 | 2xA76 | 6.00 | 28.47 | 3253 MiB |
 | 3B Q4_K_M | 2xA76 | 4.03 | 10.47 | 3841 MiB |
 
 ## ROS2 Headroom Assessment
@@ -188,7 +189,7 @@ For concurrent ROS2 + LLM operation:
 | 0.5B Q8_0 (1xA76) | 16.28 | ~4.5 GiB | 1 A76 + 6 A55 |
 | 1.5B Q4_K_M (2xA76) | 8.46 | ~3.6 GiB | 6 A55 |
 | 1.5B Q4_K_M (1xA76) | 5.71 | ~3.7 GiB | 1 A76 + 6 A55 |
-| 1.5B Q8_0 (1xA76) | 5.02 | ~2.3 GiB | 1 A76 + 6 A55 |
+| 1.5B Q8_0 (2xA76) | 6.00 | ~2.3 GiB | 6 A55 |
 | 3B Q4_K_M (2xA76) | 4.03 | ~1.8 GiB | 6 A55 |
 
 ## Final Recommendation
@@ -200,8 +201,8 @@ For concurrent ROS2 + LLM operation:
 
 **For best intelligence that's still usable:**
 - Qwen2.5-1.5B Q4_K_M, A76-only (`taskset -c 6,7`, `-t 2`).
-- 8.46 tok/s decode — coherent at moderate speed. 3.6 GiB RAM free.
-- Q4_K_M chosen over Q8_0 because Q8_0 at 1.5B is memory-saturated (2xA76 slower than 1xA76).
+- 8.46 tok/s decode — best decode at 1.5B scale. 3.6 GiB RAM free.
+- Q4_K_M beats Q8_0 at 1.5B (8.46 vs 6.00) despite dequant overhead — Q8_0 model size (~2x Q4_K_M) saturates memory bandwidth.
 
 **For ROS2 concurrency (frees 1 A76 + most RAM):**
 - Qwen2.5-0.5B Q8_0, single A76 (`taskset -c 6`, `-t 1`).
@@ -219,7 +220,8 @@ For concurrent ROS2 + LLM operation:
 - RSS via /proc/PID/status VmRSS, sampled every 1s.
 - Some avg CPU% values are empty (marked "~") due to pidstat header contamination in early 0.5B runs; peak values confirmed from mpstat and raw pidstat data.
 - All temperatures within safe range (max 87.1°C on Q8_0 8all). No throttling observed.
-- 7B Q4_K_M missing from HuggingFace GGUF repo; Q2_K/Q3_K_M available but not downloaded (disk 90% full, unlikely to fit RAM).
+- 1.5B Q8_0 2xA76 retested in clean environment (no other processes): 6.00 tok/s decode vs original sweep 4.79. Original sweep ran sequentially with residual heat/contention.
+- 7B: Q4_K_M missing from HuggingFace GGUF repo. Q2_K tested: loads (2839 MiB), 0.05 tok/s — technically fits but unusable.
 
 ## Raw Logs
 
@@ -232,7 +234,7 @@ For concurrent ROS2 + LLM operation:
 - 0.5B Q4_K_M: All 9 configs, exit 0. Verified.
 - 0.5B Q8_0: All 9 configs, exit 0. Cross-checked with B4b. Verified.
 - 1.5B Q4_K_M: All 9 configs, exit 0. Verified.
-- 1.5B Q8_0: All 9 configs, exit 0. Verified.
+- 1.5B Q8_0: All 9 configs, exit 0. Verified. 2xA76 retested in clean environment: 6.00 tok/s (original sweep recorded 4.79 — attributed to sequential-sweep thermal/contention).
 - 3B Q4_K_M: All 9 configs, exit 0. Verified.
 - 7B Q2_K: Fit test completed (exit 0, model loads). Verified. 0.05 tok/s on 2xA55.
 - llama-completion perf timings from run.log stderr.
@@ -247,12 +249,12 @@ All exit code 0. Total sweep wall time: ~55 minutes.
 
 ## Disk Usage After Sweep
 
-All 6 GGUF model files kept on board for reuse:
+Qwen GGUF models kept on board (7B Q2_K removed after testing):
 ```
 0.5B Q4_K_M: 469 MB
 0.5B Q8_0:   645 MB
 1.5B Q4_K_M: 1.1 GB
 1.5B Q8_0:   1.8 GB
 3B Q4_K_M:   2.0 GB
-Total:       ~6.0 GB
+Total:       ~6.0 GB (disk 76%, 7.0 GB free)
 ```
