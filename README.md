@@ -38,10 +38,16 @@ orchestration, validation, and other non-inference support work.
 The next milestone is extending the persistent fixed-window loop pattern to the
 VLM bridge path.
 
+## Results
+
+All measured numbers, comparison tables, coherence analysis, and use-case
+recommendations are consolidated in **[docs/RESULTS.md](docs/RESULTS.md)**.
+
 ## Repository Layout
 
 ```text
 docs/
+  RESULTS.md               Consolidated results, tables, and recommendations
   hardware-access.md       SSH handoff checklist and board requirements
   npu-only-requirement.md  Active hard requirement for NPU-only LLM/VLM work
   roadmap.md               Gate-by-gate execution plan
