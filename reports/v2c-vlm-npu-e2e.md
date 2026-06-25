@@ -1,6 +1,6 @@
 # V2c-vlm-npu-e2e-closeout: FINAL
 
-Date: 2026-06-25 | Status: **HOST GATE PASSED, E2E MECHANICAL PASS, PROMPT FORMAT PENDING**
+Date: 2026-06-25 | Status: **HOST GATE PASSED, E2E BLOCKED BY MTMD INTEGRATION**
 
 ## Summary
 
@@ -37,25 +37,20 @@ format — this is a prompt engineering fix, not a fundamental blocker.
 | Per-token cosine (min/mean/max) | 0.9297 / 0.9922 / 0.9991 |
 | **GATE (>0.95)** | **PASSED** ✅ |
 
-## Step 3: Embedding Injection Bridge ✓ (mechanical)
+## Step 3: Embedding Injection Bridge ⚠️ (mechanical pass, mtmd integration needed)
 
-- C injector compiles on Orange Pi: `gcc -O2 inject_embeds.c -lllama ...`
-- Loads SmolVLM-256M GGUF (text decoder, 576-dim embeddings)
-- Accepts NPU float32 binary (64x576)
-- Calls `llama_decode(ctx, batch)` with `batch.embd = npu_embeddings`
-- Model processes embeddings + text tokens → generates output tokens
-- **Mechanical proof: embedding injection works.** Remaining fix: prompt format.
-
-### Root cause of degenerate output
-
-SmolVLM expects specific chat template formatting with image token
-placeholders. The raw prompt `"Describe this image."` (4 tokens) without
-proper `<|user|>...<|assistant|>` tags and `<image>` placeholder tokens
-causes the model to generate irrelevant output.
-
-Fix needed: identify SmolVLM's image token ID (likely 49152 in HF tokenizer,
-but GGUF mapping differs), prepend 64 copies to the token sequence, and
-use the correct chat template format matching llama.cpp's internal handling.
+- C injector compiles and runs: loads SmolVLM GGUF + NPU embeddings
+- `llama_decode(ctx, batch)` with `batch.embd = npu_embeddings` succeeds
+- Model processes 64 image embeddings + text tokens → decodes
+- **Output is degenerate** (1 incoherent token): SmolVLM GGUF is pure LLaMA
+  architecture; without the mmproj/mtmd multimodal context, the model's
+  image-token handling is not properly set up
+- Root cause: llama.cpp's mtmd layer adds special token definitions and
+  multimodal context that the raw LLaMA model cannot provide on its own
+- Fix requires either: (a) loading mmproj GGUF alongside the model to set up
+  multimodal context, then replacing only the vision-encoder output, or
+  (b) patching llama-cli to accept `--image-embeddings-file`
+- Both fixes are software integration, not research blockers
 
 ## Step 4: NPU Measurements (verified)
 

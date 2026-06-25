@@ -65,13 +65,19 @@ int main(int argc, char **argv) {
     struct llama_context *ctx = llama_new_context_with_model(model, cparams);
     if (!ctx) { fprintf(stderr, "Failed to create context\n"); llama_model_free(model); free(embeddings); return 1; }
     
-    // Tokenize prompt
-    int text_tokens[512];
-    int n_text = llama_tokenize(vocab, prompt, strlen(prompt), text_tokens, 512, true, true);
-    if (n_text < 0) n_text = 0;
-    printf("Text tokens: %d\n", n_text);
+    // Don't use <image> token at all - just prepend embeddings
+    // Tokenize ONLY the text prompt (no image token)
+    int all_tokens[512];
+    int n_all = llama_tokenize(vocab, prompt, strlen(prompt), all_tokens, 512, true, true);
+    if (n_all < 0) n_all = 0;
+    printf("Text prompt tokens: %d\n", n_all);
     
-    int n_total = n_img_tokens + n_text;
+    // Place all image embeddings at the start, then text tokens after
+    int n_before = 0;
+    int n_after = n_all;
+    int image_pos = 0;
+    int n_total = n_before + n_img_tokens + n_after;
+    printf("Sequence: %d image + %d text = %d total\n", n_img_tokens, n_after, n_total);
     
     // Build batch for image embeddings
     struct llama_batch img_batch;
@@ -90,40 +96,69 @@ int main(int argc, char **argv) {
         seq_id_arr[i][0] = 0;
     }
     
-    // Image batch - embedding injection
-    img_batch.token = token_arr;
-    img_batch.embd = embeddings;  // THE KEY: use embeddings instead of tokens
-    img_batch.pos = pos;
-    img_batch.n_seq_id = n_seq_id_arr;
-    img_batch.seq_id = seq_id_arr;
-    img_batch.logits = logits_arr;
-    
-    printf("Decoding %d image embeddings...\n", n_img_tokens);
-    if (llama_decode(ctx, img_batch) != 0) {
-        fprintf(stderr, "Image decode failed\n");
-        goto cleanup;
+    // Step 1: Decode text before image
+    if (n_before > 0) {
+        struct llama_batch before_batch;
+        before_batch.n_tokens = n_before;
+        before_batch.token = token_arr;
+        before_batch.embd = NULL;
+        before_batch.pos = pos;
+        before_batch.n_seq_id = n_seq_id_arr;
+        before_batch.seq_id = seq_id_arr;
+        before_batch.logits = logits_arr;
+        for (int i = 0; i < n_before; i++) {
+            pos[i] = i;
+            token_arr[i] = all_tokens[i];
+            logits_arr[i] = 0;
+        }
+        printf("Decoding %d text tokens before image...\n", n_before);
+        if (llama_decode(ctx, before_batch) != 0) {
+            fprintf(stderr, "Pre-image decode failed\n");
+            goto cleanup;
+        }
     }
     
-    // Text batch
-    printf("Decoding %d text tokens...\n", n_text);
-    struct llama_batch text_batch;
-    text_batch.n_tokens = n_text;
-    text_batch.token = token_arr;
-    text_batch.embd = NULL;  // NULL = use token IDs
-    text_batch.pos = pos;
-    text_batch.n_seq_id = n_seq_id_arr;
-    text_batch.seq_id = seq_id_arr;
-    text_batch.logits = logits_arr;
-    
-    for (int i = 0; i < n_text; i++) {
-        pos[i] = n_img_tokens + i;
-        token_arr[i] = text_tokens[i];
-        logits_arr[i] = (i == n_text - 1) ? 1 : 0;
+    // Step 2: Decode image embeddings
+    {
+        struct llama_batch img_batch;
+        img_batch.n_tokens = n_img_tokens;
+        img_batch.token = token_arr;
+        img_batch.embd = embeddings;
+        img_batch.pos = pos;
+        img_batch.n_seq_id = n_seq_id_arr;
+        img_batch.seq_id = seq_id_arr;
+        img_batch.logits = logits_arr;
+        for (int i = 0; i < n_img_tokens; i++) {
+            pos[i] = n_before + i;
+            logits_arr[i] = 0;
+        }
+        printf("Decoding %d image embeddings...\n", n_img_tokens);
+        if (llama_decode(ctx, img_batch) != 0) {
+            fprintf(stderr, "Image decode failed\n");
+            goto cleanup;
+        }
     }
     
-    if (llama_decode(ctx, text_batch) != 0) {
-        fprintf(stderr, "Text decode failed\n");
-        goto cleanup;
+    // Step 3: Decode text after image
+    if (n_after > 0) {
+        struct llama_batch after_batch;
+        after_batch.n_tokens = n_after;
+        after_batch.token = token_arr;
+        after_batch.embd = NULL;
+        after_batch.pos = pos;
+        after_batch.n_seq_id = n_seq_id_arr;
+        after_batch.seq_id = seq_id_arr;
+        after_batch.logits = logits_arr;
+        for (int i = 0; i < n_after; i++) {
+            pos[i] = n_before + n_img_tokens + i;
+            token_arr[i] = all_tokens[i];  // just use all tokens (no image placeholder in prompt)
+            logits_arr[i] = (i == n_after - 1) ? 1 : 0;
+        }
+        printf("Decoding %d text tokens after image...\n", n_after);
+        if (llama_decode(ctx, after_batch) != 0) {
+            fprintf(stderr, "Post-image decode failed\n");
+            goto cleanup;
+        }
     }
     
     // Generate
@@ -132,7 +167,9 @@ int main(int argc, char **argv) {
     
     int bos_id = llama_vocab_bos(vocab);
     int eos_id = llama_vocab_eos(vocab);
+    printf("BOS=%d, EOS=%d\n", bos_id, eos_id);
     int n_gen_out = 0;
+    int prefix_len = n_before + n_img_tokens + n_after;
     
     struct llama_batch gen_batch;
     gen_batch.n_tokens = 1;
@@ -144,7 +181,7 @@ int main(int argc, char **argv) {
     gen_batch.logits = logits_arr;
     
     for (int i = 0; i < n_gen; i++) {
-        float *logits_out = llama_get_logits_ith(ctx, n_text - 1 + i);
+        float *logits_out = llama_get_logits_ith(ctx, n_after > 0 ? (n_after - 1 + i) : i);
         if (!logits_out) break;
         
         int best_token = -1;
@@ -157,7 +194,34 @@ int main(int argc, char **argv) {
             }
         }
         
-        if (best_token == eos_id || best_token < 0) break;
+        if (best_token < 0) break;
+        // Don't stop at EOS for this test - let it generate full response
+        if (best_token == eos_id && i > 8) break;  // only stop EOS after several tokens
+        
+        // Debug: show top-5 tokens
+        if (i < 3) {
+            printf("[top5:");
+            // Simple bubble to find top 5
+            int top_idx[5] = {-1,-1,-1,-1,-1};
+            float top_val[5] = {-INFINITY,-INFINITY,-INFINITY,-INFINITY,-INFINITY};
+            for (int j = 0; j < n_vocab && j < 49280; j++) {
+                if (j == bos_id) continue;
+                float v = logits_out[j];
+                for (int k = 0; k < 5; k++) {
+                    if (v > top_val[k]) {
+                        for (int l = 4; l > k; l--) { top_idx[l] = top_idx[l-1]; top_val[l] = top_val[l-1]; }
+                        top_idx[k] = j; top_val[k] = v; break;
+                    }
+                }
+            }
+            for (int k = 0; k < 5; k++) {
+                if (top_idx[k] >= 0) {
+                    char p[64]; llama_token_to_piece(vocab, top_idx[k], p, sizeof(p), 0, true);
+                    printf("%d:'%s'=%.1f ", top_idx[k], p, top_val[k]);
+                }
+            }
+            printf("] ");
+        }
         
         char piece[256];
         int n_piece = llama_token_to_piece(vocab, best_token, piece, sizeof(piece), 0, true);
@@ -165,7 +229,7 @@ int main(int argc, char **argv) {
         fwrite(piece, 1, n_piece, stdout);
         fflush(stdout);
         
-        pos[0] = n_img_tokens + n_text + i;
+        pos[0] = prefix_len + i;
         token_arr[0] = best_token;
         logits_arr[0] = 1;
         
