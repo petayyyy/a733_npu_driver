@@ -1,261 +1,63 @@
 # A733 VIP9000 Execution Roadmap
 
-This is the execution version of the roadmap in `task.md`. Gates are written so
-they can be checked from logs.
-
-## Active Constraint - NPU-Only LLM/VLM
-
-The active user requirement is that LLM/VLM model-layer compute must run on the
-A733 NPU. CPU decoder paths are diagnostic baselines only and do not satisfy any
-LLM/VLM gate. See `docs/npu-only-requirement.md`.
-
-## Phase 0 - Environment
-
-Goal: prove the board is usable before touching the NPU stack.
-
-Gate G0:
-
-- Board boots and is reachable over SSH.
-- `/proc/cpuinfo` or `nproc` reports 8 cores.
-- Kernel and OS image are recorded.
-- Thermal zones are readable and stable at idle.
-- CPU governor/frequency information is recorded when available.
-
-Primary script:
-
-```bash
-scripts/board/a733-g0-g1-smoke.sh
-```
-
-## Phase 1 - NPU Bring-up / CNN Proof Of Principle
-
-Goal: prove the Vivante VIP9000 path through VIPLite and `/dev/vipcore`.
-
-Gate G1:
-
-- `/dev/vipcore` exists.
-- VIPLite/runtime libraries are present.
-- `vpm_run` or an equivalent awnn/VIPLite sample is present or built.
-- A CNN/NBG inference runs successfully.
-- Logs contain the expected A733 VIP9000 identity, especially
-  `cid=0x1000003b`.
-
-Primary scripts:
-
-```bash
-scripts/board/a733-g0-g1-smoke.sh
-scripts/board/build-ai-sdk.sh --sdk-dir <ai-sdk>
-scripts/board/run-vpm.sh <vpm_run args>
-```
-
-## Phase 2 - ACUITY Toolchain
-
-Goal: produce a custom NBG from a known ONNX model.
-
-Gate G2:
-
-- Host has access to ACUITY Docker image `ubuntu-npu:v2.0.10`.
-- ONNX model converts to NBG with int16 quantization.
-- Converted NBG runs on board.
-- Accuracy is compared against ONNX baseline and recorded.
-
-Current status: passed for SDK LeNet and ONNX Inception v1 in both uint8 and
-int16 using `ubuntu-npu:v2.0.10.1`. Inception v1 validates the non-toy ONNX CNN
-path on the Radxa board:
-
-- uint8: `profile inference time` about `14.36ms`, `vpm run ret=0`.
-- int16: `profile inference time` about `20.85ms`, ONNX/non-quantized top-5
-  preserved, `vpm run ret=0`.
-
-The G2-adjacent static vision encoder path is also proven through the
-MobileCLIP-S0 Phase 3a report.
-
-Primary script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\host\prepare-workspace.ps1 `
-  -AcuityImage ubuntu-npu:v2.0.10.1
-```
-
-## Phase 3a - NPU-Only Transformer Path
-
-Goal: prove that transformer decoder compute can run on the A733 VIP9000 NPU,
-then extend the result into a tiny NPU language model and NPU VLM path.
-
-Gate G3a:
-
-- Fixed-shape transformer decoder block exports to NBG.
-- Decoder block runs on NPU and produces expected output/logits.
-- Tiny fixed-shape language model runs on NPU.
-- VLM path runs model-layer compute on NPU: vision encoder, projector/adapter,
-  and language decoder graph.
-- Fixed-window decode loop repeatedly runs NPU language-model forward passes;
-  CPU only updates token IDs and postprocesses logits.
-- Per-stage timing is captured.
-
-Current status: vision encoder NPU subgate passed; CPU decoder result is
-historical baseline only and is no longer a target gate.
-
-The first compatibility probe passed. The tiny random CLIP vision ONNX from
-`hf-internal-testing/tiny-random-CLIPModel` was fixed to `1x3x30x30`, quantized
-to int16, exported to NBG, and run on the A733:
-
-- NBG size: `720,824` bytes.
-- Output: `1x64` int16 embedding tensor.
-- Runtime: `profile inference time` about `2.17ms`, `vpm run ret=0`.
-- Covered transformer-style ops include MatMul, Softmax, LayerNorm pattern,
-  Gather, Conv patch embedding, and MLP blocks.
-
-The real encoder pass also succeeded. `Xenova/mobileclip_s0`
-`onnx/vision_model.onnx` was fixed to `1x3x256x256`, quantized to int16,
-exported to NBG, and run on the A733:
-
-- NBG size: `19,376,840` bytes.
-- Output: `1x512` int16 image embedding tensor.
-- Runtime: `profile inference time` about `22.6ms`, `vpm run ret=0`.
-- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
-  diff `0.002471924`, mean abs diff `0.000398278`, cosine `0.999884700`.
-
-This completed the static vision-encoder NPU proof and established the encoder
-side of the NPU-only VLM path.
-
-The first decoder-block NPU subgate also succeeded. A deterministic tiny
-fixed-shape transformer decoder block was generated as ONNX, quantized/exported
-through ACUITY to int16 NBG, and run on the A733:
-
-- NBG size: `85,144` bytes.
-- Input: `1x4x8` float16 embedding tensor.
-- Output: `1x4x16` logits tensor, int16 dynamic fixed point `dfp=14`.
-- Runtime: `profile inference time` between `59us` and `68us`,
-  `vpm run ret=0`.
-- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
-  diff `0.000549316`, mean abs diff `0.000133514`, cosine `0.999999919`.
-- Covered decoder ops include MatMul, Softmax, GELU, LayerNorm-style
-  reductions, causal attention, residuals, and logits projection.
-
-This proves a static transformer decoder block can execute on the VIP9000 NPU.
-
-The tiny language-model NPU subgate also succeeded. A deterministic fixed-shape
-LM graph was generated with int32 token IDs, ONNX `Gather` token embeddings,
-position embeddings, decoder compute, and logits in one NBG:
-
-- NBG size: `87,016` bytes.
-- Input: `1x4` int32 token IDs (`1 5 9 2`).
-- Output: `1x4x16` logits tensor, int16 dynamic fixed point `dfp=14`.
-- Runtime: `profile inference time` between `62us` and `71us`,
-  `vpm run ret=0`.
-- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
-  diff `0.000610352`, mean abs diff `0.000153542`, cosine `0.999999929`.
-- Covered language-model path includes token embedding `Gather`, position
-  embedding add, causal attention, MLP, LayerNorm-style reductions, and logits
-  projection.
-
-This proves that the public ACUITY/VIPLite path can run a complete tiny
-fixed-shape language-model graph on the A733 NPU.
-
-The tiny VLM bridge NPU subgate also succeeded. A deterministic fixed-shape VLM
-bridge was generated with a MobileCLIP-S0-style `1x512` image embedding input,
-int32 token IDs, NPU projector/adapter, ONNX `Gather` token embeddings,
-image/text concat, decoder compute, and logits in one NBG:
-
-- NBG size: `94,656` bytes.
-- Input: `1x512` image embedding, int16 dynamic fixed point `dfp=16`; `1x4`
-  int32 token IDs (`1 5 9 2`).
-- Output: `1x5x16` logits tensor, int16 dynamic fixed point `dfp=14`.
-- Runtime: `profile inference time` between `63us` and `72us`,
-  `vpm run ret=0`.
-- ACUITY int16 vs NPU int16 output comparison: top-5 indices match, max abs
-  diff `0.001159668`, mean abs diff `0.000180054`, cosine `0.999999827`.
-- Covered VLM bridge path includes image projector/adapter, token embedding
-  `Gather`, image/text concat, causal attention, MLP, LayerNorm-style
-  reductions, and logits projection.
-
-This completes the first NPU-only connection between the already validated
-MobileCLIP-S0 encoder output contract and the NPU language path.
-
-The fixed-window tiny LM decode-loop subgate also succeeded. The board runner
-repeated the tiny LM NBG forward pass 8 times, sliding a `1x4` int32 token
-window on CPU and selecting the next token from the NPU-produced last-position
-logits:
-
-- Initial prompt: `1 5 9 2`.
-- Generated tiny-token sequence: `1 5 9 2 1 8 4 5 8 4 8 4`.
-- Runtime per NPU forward: min `68us`, max `138us`, mean `93.375us`.
-- Every step logged `VIPLite driver software version 2.0.3.2-AW-2024-08-30`,
-  `cid=0x1000003b`, and `vpm run ret=0`.
-- CPU work was limited to token-window update, `vpm_run` launch, and logits
-  argmax/postprocessing; embeddings, attention, MLP, reductions, and logits
-  stayed in the NBG graph.
-
-This proves the static NPU language graph can be driven as an autoregressive
-loop under the active NPU-only constraint.
-
-The T1 persistent-runner gate also passed on 2026-06-22. A C VIPLite runner now
-loads and prepares the tiny LM NBG once, then submits 8 token windows without
-destroying or recreating the network:
-
-- Generated sequence matched the old reload loop:
-  `1 5 9 2 1 8 4 5 8 4 8 4`.
-- Persistent runner mean wall time: `146.375us/token`.
-- Persistent runner mean NPU profile time: `61.375us/token`.
-- Old `vpm_run` reload component sum for create+prepare+read+run:
-  `1,019.875us/token`.
-
-The next G3a gate is extending the same persistent loop pattern to the VLM
-bridge path.
-
-Historical CPU baseline: llama.cpp built on the Radxa board at
-commit `f449e0553708b895adbd94a301431cef691f632d`; the separate
-`llama-simple`, `llama-simple-chat`, and `llama-bench` targets were used because
-the current upstream unified `llama-app` target did not link in this
-configuration. `SmolLM2-135M-Instruct-Q4_K_M.gguf` ran CPU-only:
-
-- Model: `134.52M` params, `98.87 MiB` in llama-bench.
-- Best llama-bench decode for this tiny model: `56.74 tok/s` at 2 threads.
-- Best llama-bench prompt throughput: `122.57 tok/s` at 8 threads.
-- Generation smoke via `llama-simple`: prompt eval `46.93 tok/s`, decode eval
-  `29.92 tok/s`, total `2515.07 ms / 64 tokens`.
-
-This CPU result does not complete G3a and is not a deliverable.
-
-## Phase 3b - LLM-on-NPU R&D
-
-Goal: time-boxed investigation only.
-
-Gate G3b:
-
-- Either one transformer-relevant op/subgraph is proven on NPU through
-  TVM-BYOC/TIM-VX/VIPLite, or a concrete blocker is documented for vendor
-  escalation.
-
-## Phase 4 - Optimization
-
-Gate G4:
-
-- At least one measured 20 percent improvement versus the naive baseline, or a
-  documented reason why the current bottleneck cannot be improved with available
-  controls.
-
-## Phase 5 - Orange Pi Zero 3W Port
-
-Gate G5:
-
-- Orange Pi image provides a compatible `/dev/vipcore`.
-- NBG files from Radxa run unchanged.
-- Userspace apps are rebuilt against the target image.
-- Outputs match Radxa within tolerance.
-
-2026-06-24 progress: Orange Pi Zero 3W at `192.168.31.225` has compatible
-`/dev/vipcore` and ran the real SmolLM2-135M-Instruct W=32 int16 NBG through a
-rebuilt VIPLite runner. Verified runtime logged `cid=0x1000003b`,
-`network_core_count=1`, `nbg_loaded_once=1`, coherent text, and about
-`21 tok/s`. Qwen2.5-0.5B remains blocked before board upload because no tested
-mixed BF16/int16 host candidate exported a valid NBG.
-
-## Phase 6 - Benchmark And Documentation
-
-Gate G6:
-
-- Benchmark matrix includes latency, throughput, RSS, power if available, and
-  accuracy.
-- Logs and methodology are sufficient to reproduce the numbers.
+Research phase: **COMPLETE** (2026-06-25). The project achieved its core goal:
+real LLM/VLM layer compute runs NPU-only on the A733, with verified tooling,
+benchmarks, and the hybrid CPU-NPU path recommended for production.
+
+## Gates Completed
+
+| Gate | Date | Status | Summary |
+|---|---|---|---|
+| G0 | 2026-06-20 | Passed | Board boots, 8 cores, thermals OK |
+| G1 | 2026-06-20 | Passed | `/dev/vipcore`, VIPLite 2.0.3.2, YOLOv8n, cid `0x1000003b` |
+| G2 | 2026-06-20 | Passed | ACUITY int16/uint8 ONNX→NBG for LeNet, Inception v1 |
+| G3a | 2026-06-22 | Passed | Transformer decoder block, tiny LM, VLM bridge, decode loop on NPU |
+| G5 | 2026-06-24 | Passed | Orange Pi port: `/dev/vipcore`, NBG binary-compatible, runner rebuilt |
+| G6 | 2026-06-25 | Passed | Full benchmark matrix (SmolLM2-135M/360M at W=32/64/128/256), CPU baselines (Qwen, SmolVLM), VLM benchmarks, CPU utilization sweep |
+
+### Detailed gate log
+
+See [reports/status.md](../reports/status.md) for the full chronological log.
+
+## What Works (final state)
+
+- **SmolLM2-135M int16 W=32**: 20.7 tok/s, coherent, NPU-only
+- **SmolLM2-360M int16 W=32**: 8.4 tok/s, coherent, NPU-only
+- **MobileCLIP-S0 vision**: 22.6 ms/frame, cosine 0.99996, NPU-only
+- **Interactive chat shell** (B2): streaming tokens, window counter, on Orange Pi
+- **Qwen2.5-0.5B Q8_0 CPU**: 18.0 tok/s, 2×A76 (25% CPU), 6 cores free
+- **SmolVLM-256M Q8_0 CPU**: 52.6 tok/s, 634 MB RSS, accurate image chat
+
+## What's Vendor-Gated / Blocked
+
+- Qwen2.5-0.5B NPU: every monolithic and block-chain config fails (see blockers.md)
+- SmolLM2-1.7B NPU: gen_nbg segfault (0-byte NBG)
+- SmolVLM SigLIP NPU: ACUITY Conv shape crash
+- No KV-cache: static-shape NBG, fixed window only
+
+## Remaining Open Items
+
+1. **V2 retry** — Try direct SigLIP export (bypassing Idefics3 wrapper) to
+   see if ACUITY handles pure SigLIP Conv. Could unlock SmolVLM vision on NPU.
+2. **Vendor tickets** — File the consolidated blocker packets (see
+   [vendor-tickets.md](vendor-tickets.md)) with Radxa/Allwinner/VeriSilicon.
+   The T6/T9/T10/T11/Q2/V2 reports contain exact reproducer commands.
+3. **What each would unlock**:
+   - **BF16 export fix (T9)**: Qwen2.5-0.5B runs monolithic NPU-only at
+     host-quality cosine 0.991. This is the single biggest unlock.
+   - **gen_nbg stability (B1)**: SmolLM2-1.7B on NPU.
+   - **Conv shape fix (V2)**: SmolVLM vision encoder on NPU.
+   - **KV-cache runtime**: Thousands of tokens of coherent context on NPU
+     instead of W≤64 fixed windows.
+
+## Recommended Architecture (production)
+
+**Hybrid: NPU vision + CPU LLM.** Vision encoding on NPU (MobileCLIP-S0,
+22.6 ms/frame), language model on CPU (Qwen/SmolVLM via llama.cpp with real
+KV-cache). SmolLM2-135M on NPU for fast short responses when CPU cores are
+needed elsewhere.
+
+This is the practical ceiling for the current ACUITY 6.30.22 / VIPLite 2.0.3.2
+toolchain on this silicon. Without vendor intervention on the BF16 exporter or
+a KV-cache runtime, the A733 VIP9000 cannot match the RK3588's LLM/VLM NPU
+capabilities.

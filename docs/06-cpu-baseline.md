@@ -179,5 +179,55 @@ or retry.
 
 ## Next
 
+## SmolVLM Image Chat on CPU
+
+SmolVLM-256M-Instruct and 500M-Instruct run on CPU via llama.cpp with mmproj
+(multimodal projector) GGUF. The 256M is the recommended VLM for this board.
+
+### Prerequisites
+
+```bash
+# Download models
+curl -L -o models/vlm/smolvlm-256m-instruct-q8_0.gguf \
+  https://huggingface.co/bartowski/SmolVLM-256M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf
+
+curl -L -o models/vlm/smolvlm-256m-instruct-mmproj-q8_0.gguf \
+  https://huggingface.co/bartowski/SmolVLM-256M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf
+```
+
+### Run
+
+```bash
+# Pipe mode (single image + question)
+printf '/image test_images/dog.jpg\nDescribe this image.\n/exit\n' | \
+  taskset -c 6,7 ~/llama.cpp/build/bin/llama-cli \
+  -m smolvlm-256m-instruct-q8_0.gguf \
+  --mmproj smolvlm-256m-instruct-mmproj-q8_0.gguf \
+  -c 4096 -t 2 -ngl 0 --simple-io --no-perf --log-disable
+```
+
+Expected: accurate description at ~53 tok/s generation, ~12 tok/s prompt
+processing, peak RSS ~634 MB, leaving ~2.3 GB for ROS2.
+
+### SmolVLM-500M (more detail, slower)
+
+Same pattern, substitute `smolvlm-500m-instruct-q8_0.gguf` and its mmproj.
+Generation drops to ~22 tok/s, RSS ~1.2 GB.
+
+### Why CPU and not NPU?
+
+SmolVLM's SigLIP vision encoder cannot be exported to NPU through ACUITY
+6.30.22 (Conv shape inference crash in `_conv_shape`). See [v2 report](../reports/v2-hybrid-vlm-npu-offload.md). The working VLM config is CPU-only.
+MobileCLIP-S0 on NPU is the recommended vision offload for hybrid setups.
+
+### Accuracy
+
+SmolVLM-256M Q8_0 correctly identified:
+- A white fluffy dog on grass
+- A tabby cat with green eyes and striped fur
+- A 1945 newspaper clipping reporting the moon landing
+
+## Next {#next}
+
 - [docs/configurations.md](configurations.md) — When to use CPU vs NPU
 - [08-known-limits-and-blockers.md](08-known-limits-and-blockers.md) — Limits

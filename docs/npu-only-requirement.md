@@ -66,4 +66,16 @@ deliverable for this project.
    3W.
 7. Continue extending the same persistent-loop pattern to the VLM path.
 8. Escalate concrete blockers with logs if ACUITY/VIPLite rejects required
-   transformer operations or static decoder graphs.
+    transformer operations or static decoder graphs.
+
+## Final Status (2026-06-25)
+
+The NPU-only requirement was satisfied as a proof-of-concept:
+- SmolLM2-135M/360M run NPU-only and coherently (21/8 tok/s)
+- MobileCLIP-S0 vision encoder runs NPU-only (22.6 ms)
+- Interactive chat shell works with model-layer compute on NPU
+
+Larger models (Qwen2.5-0.5B, SmolLM2-1.7B) do not satisfy this requirement —
+they are vendor-gated on the NPU path. The recommended production architecture
+is **hybrid NPU-vision + CPU-LLM**, where the NPU handles vision encoding and
+small LLMs while CPU runs Qwen-class models with real KV-cache via llama.cpp.

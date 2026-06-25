@@ -1,91 +1,54 @@
-# INT8 Quantization Strategy
+# INT8 Quantization Strategy — Final Assessment
 
-This note condenses the deep analysis in
-`research/a733-vip9000-int8-int4-quantization-root-cause.md`
-and the master-agent summary in `promts/master_about_trouble.md`.
+**Status: CLOSED (2026-06-25).** INT8 is not a viable path for LLM inference
+on the A733 NPU with ACUITY 6.30.22.
 
-## Current Decision
+## What was tested
 
-The production path is no longer blocked on int8.
+- **PCQ (per-channel int8 weights, int8 activations)**: exports and runs
+  mechanically, but produces incoherent text. Activation quantization error
+  at full model depth is too severe for coherent generation.
+- **W8A16 (per-channel int8 weights, int16 activations)**: host quality is
+  0.079 cosine on Qwen (far below the 0.90 threshold). SmoothQuant variants
+  blocked by ACUITY quantize-table serialization bug (0-byte `.quantize` file).
+- **Per-channel int16**: pegasus 6.30.22 rejects: only INT8 and INT4 qtypes
+  are supported for `perchannel_symmetric_affine`. This is chip-gated, not a
+  configuration issue.
+- **Hybrid quantization (ACUITY w8a16/hybrid)**: reaches `End quantization`
+  then hangs during YAML table serialization (0-byte `.quantize` file).
+  Affects SmolLM2 and Qwen.
 
-First get Qwen2.5-0.5B-Instruct working in int16 on the Orange Pi Zero 3W
-with 6 GB LPDDR5. The 1 GB Radxa board was the practical memory blocker for
-full Qwen int16 and full Qwen PCQ. The Orange Pi board should remove that
-constraint, so int16 can be the first useful Qwen result.
+## Why INT8 failed
 
-INT8 remains useful, but only as a later optimization after the int16 Orange Pi
-path is working.
+Activation quantization inside the transformer body dominates quality loss.
+Weight-only quantization is less destructive, but the int8 quality cliff is too
+steep for real-world LLM decoding at model scale.
 
-## What Worked
+The ACUITY hybrid YAML failure is a separate tooling bug: quantization analysis
+completes correctly (`.quantize.json` is valid) but the YAML serializer
+crashes/hangs when writing a table with hundreds of `dtype_converter` nodes.
 
-- SmolLM2-135M int16 is the known coherent baseline.
-- The persistent runner path is usable enough to validate real token output on
-  the board.
-- The Qwen2.5-0.5B int16 host/export path exists from T4/T5.
-- The vendor packet now documents the ACUITY hybrid quantize-table failure and
-  gives concrete workarounds to try.
+## Current production path
 
-## What Did Not Work
+**int16 dynamic fixed point** is the only working LLM quant on this toolchain.
+It is ~1.45× slower than ideal int8 and produces NBG files ~2× larger, but it
+generates coherent text for SmolLM2-135M/360M.
 
-- Plain PCQ int8 for real SmolLM2 quality is not acceptable: output becomes
-  garbage and does not match the CPU oracle closely enough.
-- Mixed PCQ experiments did not recover coherent text.
-- ACUITY hybrid quantization can emit a complete `.quantize.json`, but the
-  final YAML `.quantize` dump is truncated to zero bytes and ACUITY hangs.
-- QDQ-ONNX import is not a viable scale-control path because ACUITY does not
-  preserve the required Q/DQ quantization semantics for this flow.
-- Waiting for ORT VIPLite EP, etnaviv transformer support, runtime LLM.int8()
-  outlier splitting, or dynamic activation quantization is outside the useful
-  path for this repo.
+## For Qwen specifically
 
-## Why INT8 Failed So Far
+int16 DFP itself fails on Qwen (cosine 0.236) because Qwen's activation
+outliers exceed the dynamic range of single-scale int16. The only format that
+preserves Qwen quality is BF16 (cosine 0.991), which doesn't export. No int8
+or int16 path closes this gap.
 
-The working hypothesis is that the quality loss is dominated by activation
-quantization inside the transformer body, not by the graph edges. Weight-only
-or weight-mostly quantization should be less destructive, especially if
-activation outliers are smoothed offline before ONNX export.
+## Verdict
 
-The ACUITY hybrid YAML failure appears to be a separate tooling bug. It happens
-after import and quantization analysis have already succeeded, while writing the
-final YAML table for a graph with hundreds of `dtype_converter` nodes. That is
-why the vendor request is important, but it should not block the main model
-bring-up.
+INT8 quantization is not useful for LLM inference on this toolchain.
+If a vendor update provides:
+- RF8-style per-chain int4 quantization, or
+- Per-channel int16 support, or
+- Fixed BF16 export
 
-## Next Tasks
-
-### T6-port
-
-Run Qwen2.5-0.5B-Instruct int16 on the Orange Pi Zero 3W. This is the next
-production gate.
-
-Prompt: `promts/t6_new.md`
-
-Success means coherent Qwen text on the Orange Pi NPU with tok/s, RSS, NBG
-size, create time, first-token latency, and NPU profile time recorded.
-
-### T7-w8a16
-
-Try W8A16 as an optimization after the int16 path is working:
-
-- int8 per-channel PCQ weights;
-- int16 activations;
-- offline SmoothQuant-style smoothing before ONNX export;
-- ACUITY host simulator plus per-layer cosine gate before board testing;
-- widen any collapsing layer back to int16.
-
-Prompt: `promts/t7.md`
-
-Success means coherent output with smaller NBG/RSS than int16. If W8A16 still
-fails after per-layer widening, keep int16 as the production path and treat the
-logged per-layer cosine as the useful result.
-
-## Vendor Workaround Experiments
-
-The vendor package now asks for guidance on an undocumented ACUITY hybrid
-failure and gives two practical experiments:
-
-1. Reconstruct YAML `.quantize` from the completed `.quantize.json`.
-2. Reduce the `dtype_converter` count by keeping larger connected subgraphs at
-   one precision.
-
-Packet: `reports/t6-vendor-acuity-hybrid-quantize-table.md`
+then a lightweight integer quant may become viable. Until then, use int16 for
+NPU-LLM (SmolLM2 class only) and fall back to CPU for models that need BF16
+precision (Qwen).
