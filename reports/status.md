@@ -1230,3 +1230,40 @@ Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM pat
 V1 gate passed: SmolVLM-256M-Instruct Q8_0 is the runnable CPU VLM for the
 Orange Pi Zero 3W. Next VLM step is vision-on-NPU offload (mobileclip_s0 encoder
 already verified at 22.6ms on NPU in B3).
+
+- Task V2-hybrid-vlm-npu-offload completed at host gates; Orange Pi not reached
+  (no NBG produced for board upload).
+  - Identified SmolVLM-256M vision encoder: SigLIP-base (12 layers, 768 hidden,
+    12 heads, patch=16, image=512), with Idefics3VisionTransformer wrapper and
+    Idefics3Connector (1024→64 pooling, 768→576 projection).
+  - Exported vision encoder + connector to ONNX (357 MB, 1x3x512x512 → 1x64x576).
+    ONNX Runtime output matches PyTorch: max diff 0.00005674, cosine 1.00000000.
+  - Verified ONNX contains NonZero op (patch position ID generation), unsupported
+    by ACUITY 6.30.22: `Acuity can not support NonZero op in specified dynamic
+    shape model for now`.
+  - Replaced NonZero with Constant[int64] (all 1024 patches valid for 512×512).
+    ONNX check passes, ONNX Runtime output matches (cosine 1.00000000, verified).
+  - ACUITY import still fails after NonZero removal:
+    `IndexError: list index out of range` in `_conv_shape` (smart_toolkit.py:1571)
+    during Conv patch embedding shape inference. Tested opset 15 and 17 — same error.
+  - MobileCLIP-S0 fallback assessed: 1x512 embedding vs SmolVLM's 1x64x576 —
+    dimensionally incompatible without a trained adapter (out of scope).
+  - Result: SmolVLM vision-on-NPU blocked by dual ACUITY limitations
+    (NonZero + Conv shape inference). V1 CPU-only remains the deliverable.
+  - Report added: `reports/v2-hybrid-vlm-npu-offload.md`.
+  - Host scripts added: `scripts/host/export_smolvlm_vision_onnx.py`,
+    `scripts/host/remove_nonzero.py`, `scripts/host/fix_onnx.py`,
+    `scripts/host/make_calib_fixed.py`.
+
+## Next Gate
+
+Q2 Gate 2B continuation: VIPLite Multi-Graph chaining PASSED on Orange Pi.
+  2-NBG chain (block0->block1) runs stably at 10.3ms/iteration with both NBGs
+  loaded once. Estimated full 26-NBG chain: ~130ms/token forward pass, ~7-8 tok/s.
+  Gate 2C (full 26-NBG chain) is the remaining step.
+
+NPU-vision remains valid (MobileCLIP-S0 at 22.6ms). SmolLM2-135M int16 runs on
+Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM path.
+
+V1 gate passed: SmolVLM-256M-Instruct Q8_0 CPU VLM deliverable.
+V2 gate blocked: SmolVLM vision encoder cannot convert to NBG (ACUITY NonZero + Conv).
