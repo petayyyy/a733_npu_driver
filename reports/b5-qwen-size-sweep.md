@@ -49,7 +49,7 @@ zones before/after. Core mapping confirmed via lscpu: A76=6,7, A55=0-5.
 | Qwen2.5-1.5B-Instruct | Q8_0 | 1.8 GB | YES | 3395 MiB | ~2.3 GiB | Tight for ROS2 concurrent |
 | Qwen2.5-3B-Instruct | Q4_K_M | 2.0 GB | YES | 3855 MiB | ~1.8 GiB | Barely interactive (<4 tok/s) |
 | Qwen2.5-7B-Instruct | Q4_K_M | N/A | DOES NOT FIT | — | — | Q4_K_M not in HF GGUF repo |
-| Qwen2.5-7B-Instruct | Q2_K | ~2.8 GB | NOT TESTED | — | — | Disk full (90%); Q2 quality too low |
+| Qwen2.5-7B-Instruct | Q2_K | 2.9 GB | **YES (loads!)** | ~2839 MiB | ~2.8 GiB | 0.05 tok/s — loads but unusably slow |
 
 All values verified/measured on hardware. "Peak RSS" is the maximum observed
 across all 9 core configs for that model.
@@ -159,10 +159,13 @@ across all 9 core configs for that model.
 - **RSS:** ~3.8 GiB — very tight. Only ~1.8 GiB free. ROS2 concurrent use unlikely.
 - **VERDICT:** Loads and runs, but not recommended for interactive use. Usable for batch/offline scenarios at 2xA76 if 4 tok/s is acceptable.
 
-### 7B
-- **Q4_K_M not in HuggingFace GGUF repo.** Smallest available is Q2_K (~2.8 GB).
-- Even if Q2_K loaded, RAM usage would exceed available memory at ctx=2048.
-- **VERDICT:** Does not fit on this board.
+### 7B Q2_K
+- **Q4_K_M not in HuggingFace GGUF repo.** Smallest available: Q2_K (2.9 GB).
+- **Q2_K LOADS at ctx=2048.** Projected memory: 2839 MiB. Model fits in 5.7 GiB RAM.
+- **BUT: 0.05 tok/s on 2xA55** (22.2 seconds for a single token). Effectively unusable.
+- Load time: ~66 seconds. Not practical for any interactive scenario.
+- Full sweep not run — single A76 would improve decode maybe to 0.1-0.15 tok/s (still unusable).
+- VERDICT: Technically loads but too slow for any real use. Q2 quality already heavily degraded. Not recommended.
 
 ## Cross-Model Comparison: Best Decode Tok/s
 
@@ -205,8 +208,8 @@ For concurrent ROS2 + LLM operation:
 - 16.28 tok/s — only 7% slower than 2xA76. Frees core 7 + all 6 A55 for ROS2/picoclaw.
 - 4.5 GiB RAM free.
 
-**3B:** Loads but not recommended (4.03 tok/s, 1.8 GiB free). Batch/offline only.
-**7B:** Does not fit. Q4_K_M unavailable; Q2_K impractical on 5.7 GiB.
+**3B:** Loads but not recommended for interactive use (4.03 tok/s, 1.8 GiB free). Batch/offline only.
+**7B:** Q2_K loads (2839 MiB) but 0.05 tok/s. Q4_K_M unavailable. Not recommended.
 
 ## Notes
 
@@ -231,7 +234,7 @@ For concurrent ROS2 + LLM operation:
 - 1.5B Q4_K_M: All 9 configs, exit 0. Verified.
 - 1.5B Q8_0: All 9 configs, exit 0. Verified.
 - 3B Q4_K_M: All 9 configs, exit 0. Verified.
-- 7B: Q4_K_M not in HF GGUF. Not run. Recorded.
+- 7B Q2_K: Fit test completed (exit 0, model loads). Verified. 0.05 tok/s on 2xA55.
 - llama-completion perf timings from run.log stderr.
 - pidstat %CPU from pidstat.log (field $9, %CPU column).
 - RSS from /proc/PID/status VmRSS sampling.
