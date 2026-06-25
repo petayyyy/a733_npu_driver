@@ -43,6 +43,7 @@ filling the filesystem (a previous run produced a 9.9 GB stdout.log).
 | -t | Core(s) | Core type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8-cores | Peak RSS | Temp max |
 |----|---------|-----------|--------------|-------------|----------|-----------|-------------|----------|----------|
 | 1  | 0       | A55       | 18.18        | 6.33        | ~100%    | 100%      | 13%         | 1,188 MiB | 80.5°C |
+| 2  | 0,1     | 2×A55     | 36.68        | 10.73       | ~199%    | 200%      | 25%         | 1,195 MiB | 81.1°C |
 | 1  | 6       | A76       | 64.76        | 16.54       | ~100%    | 100%      | 13%         | 1,106 MiB | 78.6°C |
 | 2  | 6,7     | 2×A76     | 128.74       | **18.03**   | ~199%    | 200%      | 25%         | 1,109 MiB | 79.2°C |
 | 4  | 4-7     | 2×A76+2×A55 | 129.55     | 16.77       | ~391%    | 399%      | 49%         | 1,141 MiB | 82.7°C |
@@ -61,8 +62,11 @@ All values verified/measured on hardware.
   Prefill is compute-bound (batch matmul), where A76's wider SIMD and higher
   clock (2.0 vs 1.8 GHz) dominate.
 - **One A76 vs two A76:** decode 16.54 → 18.03 tok/s (+9%). The second A76
-  core barely helps — decode is already saturating memory bandwidth with one
-  A76 core. The second core mainly reduces OpenMP sync gaps.
+  core barely helps — one A76 nearly saturates memory bandwidth on decode.
+- **One A55 vs two A55:** decode 6.33 → 10.73 tok/s (+70%). Unlike A76, a
+  single A55 does NOT saturate memory bandwidth — the second A55 core finds
+  unused bandwidth, nearly doubling throughput. Two A55 (10.73) still lose to
+  one A76 (16.54).
 - **A55 pair (4,5) implicitly tested in t=4:** prefill barely budges vs t=2
   (129.55 vs 128.74), confirming A55 cores add little to memory-bound decode.
 
@@ -84,6 +88,7 @@ All values verified/measured on hardware.
 | -t | Active cores | Observation |
 |----|-------------|------------|
 | 1 A55 | 0 | Core 0 ~100%, others idle |
+| 2 A55 | 0,1 | Both cores ~100%, others idle |
 | 1 A76 | 6 | Core 6 ~100%, others idle |
 | 2  | 6,7 (A76)   | Core 6 ~100%, core 7 ~0-100% intermittent |
 | 4  | 4-7         | All 4 cores ~92-100% |
@@ -92,10 +97,10 @@ All values verified/measured on hardware.
 
 ## Thermals
 
-| Zone | t=1 A55 | t=1 A76 | t=2 | t=4 | t=6 | t=8 |
-|------|---------|---------|-----|-----|-----|-----|
-| zone0 (CPU?) | 80.5°C | 78.6°C | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
-| zone3 (GPU/NPU?) | 75.1°C | 75.8°C | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
+| Zone | t=1 A55 | t=2 A55 | t=1 A76 | t=2 | t=4 | t=6 | t=8 |
+|------|---------|---------|---------|-----|-----|-----|-----|
+| zone0 | 80.5°C | 81.1°C | 78.6°C | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
+| zone3 | 75.1°C | 76.3°C | 75.8°C | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
 
 All within safe range. No throttling observed.
 
@@ -123,7 +128,7 @@ availability.
 
 ## Verification
 
-- All 6 runs (t=1 A55, t=1 A76, t=2, t=4, t=6, t=8) completed with exit code 0.
+- All 7 runs (t=1 A55, t=2 A55, t=1 A76, t=2 A76, t=4, t=6, t=8) completed with exit code 0.
 - llama-completion perf timings extracted from stderr.log.
 - pidstat %CPU values extracted from pidstat.log.
 - RSS peak computed from rss.log sampling at 0.2s intervals.
