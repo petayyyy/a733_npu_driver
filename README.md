@@ -74,6 +74,7 @@ Then follow the run guide for your use case:
 | Interactive chat shell on board | [docs/04-chat-shell.md](docs/04-chat-shell.md) |
 | Run MobileCLIP vision encoder on NPU | [docs/05-run-vlm-npu.md](docs/05-run-vlm-npu.md) |
 | Run Qwen on CPU with real KV-cache | [docs/06-cpu-baseline.md](docs/06-cpu-baseline.md) |
+| Run VLM image chat (CLI app) | [docs/09-vlm-app.md](docs/09-vlm-app.md) |
 | Run SmolVLM image chat on CPU | [docs/06-cpu-baseline.md](docs/06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | Port from Radxa to Orange Pi | [docs/07-porting-radxa-to-orangepi.md](docs/07-porting-radxa-to-orangepi.md) |
 | Understand limits and blockers | [docs/08-known-limits-and-blockers.md](docs/08-known-limits-and-blockers.md) |
