@@ -36,7 +36,7 @@ for ROS2) and low-end VLM (SmolVLM-256M Q8_0, 52.6 tok/s, 634 MB RSS).
 | Works (CPU) | SmolVLM-500M-Instruct Q8_0 image chat, 22.3 tok/s |
 | Export FAILS | Qwen2.5-0.5B on NPU — int16 cosine 0.236; FP16 0.541; BF16 vnn_VerifyGraph -3; W8A16 0.079; block-chained degenerates at 6.6 tok/s |
 | Export FAILS | SmolLM2-1.7B on NPU — gen_nbg segfault, 0-byte NBG |
-| Export FAILS | SmolVLM SigLIP encoder on NPU — ACUITY Conv shape crash |
+| **Works (hybrid)** | **SmolVLM SigLIP on NPU → CPU LLM** — Conv→MatMul rewrite, NBG exports, e2e accurate on 3 test images (V2d) |
 | N/A | No KV-cache (static-shape NBG); short fixed window W≤64 only |
 | N/A | No working LLM int8/int4 (pcq quality fails, per-channel int16 not in ACUITY) |
 
