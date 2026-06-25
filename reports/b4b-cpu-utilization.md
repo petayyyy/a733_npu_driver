@@ -40,14 +40,31 @@ filling the filesystem (a previous run produced a 9.9 GB stdout.log).
 
 ## Results
 
-| -t | Cores | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8-cores | Peak RSS | Temp max |
-|----|-------|--------------|-------------|----------|-----------|-------------|----------|----------|
-| 2  | 6,7   | 128.74       | **18.03**   | ~199%    | 200%      | 25%         | 1,109 MiB | 79.2°C |
-| 4  | 4-7   | 129.55       | 16.77       | ~391%    | 399%      | 49%         | 1,141 MiB | 82.7°C |
-| 6  | 2-7   | 157.33       | 16.13       | ~590%    | 593%      | 74%         | 1,201 MiB | 84.5°C |
-| 8  | 0-7   | 161.88       | 13.70       | ~741%    | 779%      | 93%         | 1,196 MiB | 83.8°C |
+| -t | Core(s) | Core type | Prefill tok/s | Decode tok/s | Avg CPU% | Peak CPU% | %-of-8-cores | Peak RSS | Temp max |
+|----|---------|-----------|--------------|-------------|----------|-----------|-------------|----------|----------|
+| 1  | 0       | A55       | 18.18        | 6.33        | ~100%    | 100%      | 13%         | 1,188 MiB | 80.5°C |
+| 1  | 6       | A76       | 64.76        | 16.54       | ~100%    | 100%      | 13%         | 1,106 MiB | 78.6°C |
+| 2  | 6,7     | 2×A76     | 128.74       | **18.03**   | ~199%    | 200%      | 25%         | 1,109 MiB | 79.2°C |
+| 4  | 4-7     | 2×A76+2×A55 | 129.55     | 16.77       | ~391%    | 399%      | 49%         | 1,141 MiB | 82.7°C |
+| 6  | 2-7     | 2×A76+4×A55 | 157.33     | 16.13       | ~590%    | 593%      | 74%         | 1,201 MiB | 84.5°C |
+| 8  | 0-7     | all 8     | 161.88       | 13.70       | ~741%    | 779%      | 93%         | 1,196 MiB | 83.8°C |
 
 All values verified/measured on hardware.
+
+### Key single-core observations
+
+- **A76 vs A55 decode:** A76 delivers 16.54 tok/s vs A55's 6.33 tok/s —
+  a **2.6x gap**. Decode is memory-bound, so the difference comes from A76's
+  larger caches and wider out-of-order execution keeping the memory pipeline
+  fed.
+- **A76 vs A55 prefill:** A76 64.76 tok/s vs A55 18.18 tok/s — a **3.6x gap**.
+  Prefill is compute-bound (batch matmul), where A76's wider SIMD and higher
+  clock (2.0 vs 1.8 GHz) dominate.
+- **One A76 vs two A76:** decode 16.54 → 18.03 tok/s (+9%). The second A76
+  core barely helps — decode is already saturating memory bandwidth with one
+  A76 core. The second core mainly reduces OpenMP sync gaps.
+- **A55 pair (4,5) implicitly tested in t=4:** prefill barely budges vs t=2
+  (129.55 vs 128.74), confirming A55 cores add little to memory-bound decode.
 
 ### Notes
 
@@ -66,6 +83,8 @@ All values verified/measured on hardware.
 
 | -t | Active cores | Observation |
 |----|-------------|------------|
+| 1 A55 | 0 | Core 0 ~100%, others idle |
+| 1 A76 | 6 | Core 6 ~100%, others idle |
 | 2  | 6,7 (A76)   | Core 6 ~100%, core 7 ~0-100% intermittent |
 | 4  | 4-7         | All 4 cores ~92-100% |
 | 6  | 2-7         | All 6 cores ~92-100% |
@@ -73,10 +92,10 @@ All values verified/measured on hardware.
 
 ## Thermals
 
-| Zone | t=2 | t=4 | t=6 | t=8 |
-|------|-----|-----|-----|-----|
-| zone0 (CPU?) | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
-| zone3 (GPU/NPU?) | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
+| Zone | t=1 A55 | t=1 A76 | t=2 | t=4 | t=6 | t=8 |
+|------|---------|---------|-----|-----|-----|-----|
+| zone0 (CPU?) | 80.5°C | 78.6°C | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
+| zone3 (GPU/NPU?) | 75.1°C | 75.8°C | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
 
 All within safe range. No throttling observed.
 
@@ -86,8 +105,11 @@ All within safe range. No throttling observed.
 
 Qwen2.5-0.5B Q8_0 decode on this board consumes **2 A76 cores at ~199% CPU**
 (25% of total 8-core capacity). This leaves 6 A55 cores + A76 headroom free
-for ROS2 and other workloads. Adding A55 cores (t=4,6,8) reduces decode
-speed and consumes more total CPU without benefit for decode.
+for ROS2 and other workloads.
+
+If ROS2 needs an A76 core, **-t 1 on a single A76 (core 6) delivers 16.54
+tok/s** — only 8% slower than the A76 pair, and frees core 7. A single A55
+(6.33 tok/s) is 2.6× slower and not recommended for interactive use.
 
 If prefill throughput matters (e.g., long context ingestion), t=6 or t=8 help
 (161.88 vs 128.74 tok/s), but at the cost of decode speed and core
@@ -101,7 +123,7 @@ availability.
 
 ## Verification
 
-- All 4 runs completed with exit code 0.
+- All 6 runs (t=1 A55, t=1 A76, t=2, t=4, t=6, t=8) completed with exit code 0.
 - llama-completion perf timings extracted from stderr.log.
 - pidstat %CPU values extracted from pidstat.log.
 - RSS peak computed from rss.log sampling at 0.2s intervals.
