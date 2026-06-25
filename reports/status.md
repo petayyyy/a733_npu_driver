@@ -1155,14 +1155,29 @@ workspace artifacts.
       0.0144. Far above the >0.95 gate.
     - Result: the monolithic NBG's vnn_VerifyGraph -3 IS an aggregate-graph
       limit. Per-block NBGs sidestep it.
-  - Gate 2 -- Chain 24 Blocks:
-    - Generated all 26 stage ONNX files (24 blocks + embedding + final).
-    - Block compilation: block 0 compiled (22.6 MB NBG), block 1 compiling.
-    - Estimated total NBG size: ~1,063 MB (543 MB blocks + 260 MB emb + 260 MB final).
-    - Next: compile remaining blocks, implement chained runner with VIPLite
-      Multi-Graph, port to Orange Pi at 192.168.31.225.
-  - Report added: `reports/q2-qwen-block-nbg.md`.
-  - Changes: `scripts/host/make_real_llm_onnx.py` (+150 lines for block/emb/final export).
+  - Gate 2A -- Full-Chain Host Coherence: **PASSED**.
+    - Added `scripts/host/q2_simulate_int16_chain.py` for PyTorch int16 simulation
+      with per-layer cosine drift tracking and autoregressive decode loop.
+    - Simulated 24-block int16 chain with boundary quantization (NBG output/input
+      quantize cycle): weights int16, activations int16 at each block boundary.
+    - Prompt: ChatML-wrapped "The capital of France is", W=32.
+    - Results with boundary quantization:
+      - Logits cosine: **0.974913** (above 0.90 gate).
+      - Top-1 match: **YES** (token 785 vs 785).
+      - Decode 10 steps: **10/10 token match with FP32 oracle**.
+      - Generated text: "The capital of France is Paris.\n" -- exact match.
+      - Per-layer cosine drift: >0.9999 (layers 0-16), gradual to 0.977 (layer 23),
+        sharpest drop at layers 21-23.
+    - Results without boundary quantization (weight-only int16):
+      - Logits cosine: **0.999990**, all per-layer cosines > 0.99994.
+    - Result: The int16-per-block-good-but-depth-bad hypothesis is REFUTED.
+      Per-block int16 depth accumulation is graceful (0.975 logits cosine) and
+      does not cause catastrophic failure. The monolithic int16 failure (cosine
+      0.236) was an aggregate-graph limit, not depth-accumulation.
+    - Proceed to Gate 2B (VIPLite Multi-Graph on Orange Pi).
+  - Report updated: `reports/q2-qwen-block-nbg.md`.
+  - Changes: `scripts/host/make_real_llm_onnx.py` (+150 lines),
+    `scripts/host/q2_simulate_int16_chain.py` (new, ~330 lines).
 
 - Task V1-hybrid-vlm-cpu completed on Orange Pi Zero 3W at `192.168.31.225`.
   - Verified llama.cpp at commit `be4a6a6` with multimodal (mmproj) support;
@@ -1195,8 +1210,10 @@ workspace artifacts.
 
 ## Next Gate
 
-Q2 Gate 2 continuation: compile all 26 NBGs, implement Multi-Graph chained runner,
-validate full-model coherence on host then Orange Pi.
+Q2 Gate 2B continuation: investigate VIPLite Multi-Graph API on Orange Pi
+(192.168.31.225), build 2-NBG proof-of-concept, then full 26-NBG chain only if
+Multi-Graph is viable. Gate 2A already passed host coherence; the remaining risk
+is the runtime's ability to keep all NBGs resident without per-token reload.
 
 NPU-vision remains valid (MobileCLIP-S0 at 22.6ms). SmolLM2-135M int16 runs on
 Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM path.
