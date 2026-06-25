@@ -1074,3 +1074,27 @@ workspace artifacts.
     base int16 table after saving the hybrid table under
     `work/generated/qwen25_05b_w32_chunked_hybrid_seed/`.
   - Report added: `reports/t11-qwen-chunked-bf16.md`.
+
+## 2026-06-25
+
+- Task B4b-cpu-utilization completed on Orange Pi Zero 3W at `192.168.31.225`.
+  - Fixed `run-b4b-cpu-utilization.sh`: replaced `llama-cli` with
+    `llama-completion` and kept `-no-cnv` flag; `llama-cli` rejects
+    `--no-conversation` and enters interactive infinite-generation mode,
+    filling the filesystem (previous run produced 9.9 GB stdout.log).
+  - Measured Qwen2.5-0.5B Q8_0 at ctx=2048, -n 128, for -t = 2,4,6,8:
+    - t=2 (A76 cores 6,7): prefill 128.74 tok/s, decode **18.03 tok/s**,
+      avg CPU ~199%, peak CPU 200%, peak RSS 1,109 MiB.
+    - t=4 (cores 4-7): prefill 129.55 tok/s, decode 16.77 tok/s,
+      avg CPU ~391%, peak CPU 399%.
+    - t=6 (cores 2-7): prefill 157.33 tok/s, decode 16.13 tok/s,
+      avg CPU ~590%, peak CPU 593%.
+    - t=8 (cores 0-7): prefill 161.88 tok/s, decode 13.70 tok/s,
+      avg CPU ~741%, peak CPU 779%.
+  - All runs captured pidstat, mpstat, RSS sampling, affinity, and thermals.
+    Peak temp 84.5°C, all within safe range.
+  - Recommendation: -t 2 (A76-only) for best decode at 18.03 tok/s; Qwen
+    consumes ~2 A76 cores (25% of 8-core total), leaving 6 cores free for
+    ROS2/robotics when paused.
+  - Report added: `reports/b4b-cpu-utilization.md`.
+  - Raw logs: `/home/orangepi/a733_npu_driver/logs/board/b4b-cpu-utilization/`.
