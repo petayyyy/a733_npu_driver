@@ -52,8 +52,12 @@ W≥128 exports but is incoherent for both models. See coherence cliff.
 | Qwen2.5-0.5B | Q4_K_M | 2,048 | 10.9 | 734 MB | Slower than Q8_0 |
 | SmolVLM-256M | Q8_0 | auto | 52.6 | 634 MB | Recommended VLM |
 | SmolVLM-500M | Q8_0 | auto | 22.3 | ~1.2 GB | More detail, slower |
+| Qwen2.5-3B | Q4_K_M | 2,048 | 4.0 | 3,857 MB | **Experimental, batch-only** — not for interactive chat |
 
 **Q8_0 beats Q4_K_M** on this board — always use Q8_0 for Qwen.
+> **Qwen2.5-3B loads but is not suitable for interactive chat (4 tok/s).**
+> Available as `--model qwen-3b` in `app/llm_chat.py` for experiments,
+> but recommended only for batch/offline use.
 
 ## NPU configs that FAIL
 
@@ -99,6 +103,9 @@ python3 app/llm_chat.py -q "Explain quantum computing."
 
 # Faster model
 python3 app/llm_chat.py --model qwen-0.5b
+
+# Experimental 3B (batch-only, ~4 tok/s)
+python3 app/llm_chat.py --model qwen-3b
 ```
 
 ### Hybrid: SmolVLM with NPU vision offload

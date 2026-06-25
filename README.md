@@ -34,6 +34,7 @@ for ROS2) and low-end VLM (SmolVLM-256M Q8_0, 52.6 tok/s, 634 MB RSS).
 | Works (CPU) | Qwen2.5-0.5B Q8_0, 18.0 tok/s, 2×A76 = 25% CPU, 6 cores free |
 | Works (CPU) | SmolVLM-256M-Instruct Q8_0 image chat, 52.6 tok/s, 634 MB RSS |
 | Works (CPU) | SmolVLM-500M-Instruct Q8_0 image chat, 22.3 tok/s |
+| Works (CPU,batch) | Qwen2.5-3B Q4_K_M, 4.0 tok/s — not for interactive chat, batch/offline only |
 | Export FAILS | Qwen2.5-0.5B on NPU — int16 cosine 0.236; FP16 0.541; BF16 vnn_VerifyGraph -3; W8A16 0.079; block-chained degenerates at 6.6 tok/s |
 | Export FAILS | SmolLM2-1.7B on NPU — gen_nbg segfault, 0-byte NBG |
 | **Works (hybrid)** | **SmolVLM SigLIP on NPU → CPU LLM** — Conv→MatMul rewrite, NBG exports, e2e accurate on 3 test images (V2d) |
