@@ -24,16 +24,29 @@ they don't exist. It checks whether Docker and the expected ACUITY image
 
 ## Step 2: ACUITY Docker image
 
-Pull or load the ACUITY Docker image:
+Download the ACUITY Docker image archive:
+
+[docker_images_v2.0.x.zip](https://netstorage.allwinnertech.com:5001/fsdownload/Mh23BhPHq/docker_images_v2.0.x.zip)
+(~11 GB, contains `ubuntu-npu:v2.0.10.1`)
+
+Extract and load:
+
+```powershell
+# Windows PowerShell
+Expand-Archive docker_images_v2.0.x.zip -DestinationPath docker_images
+docker load < docker_images\ubuntu-npu-v2.0.10.1.tar
+```
+
+```bash
+# Linux
+unzip docker_images_v2.0.x.zip
+docker load < ubuntu-npu-v2.0.10.1.tar
+```
+
+Alternatively, pull from a registry:
 
 ```bash
 docker pull ubuntu-npu:v2.0.10.1
-```
-
-If you have a pre-exported tarball:
-
-```bash
-docker load < ubuntu-npu-v2.0.10.1.tar
 ```
 
 Verify:
@@ -48,7 +61,22 @@ The image contains:
 - `pegasus_export_ovx_nbg.sh` for A733 NBG package generation
 - `pegasus_quantize_hybird.sh` for hybrid quantization (partially tested; see t6)
 
-## Step 3: SSH access to the board
+## Step 3: AI SDK checkout (host)
+
+The ONNX-to-NBG conversion scripts need the AI SDK helper scripts
+(`pegasus_*.sh`) on the host:
+
+```bash
+git clone https://github.com/ZIFENG278/ai-sdk work/ai-sdk/ZIFENG278-ai-sdk --depth 1
+```
+
+Only the `scripts/` directory (~200 KB) is required. The `models/` directory
+inside the checkout is used as a build workspace by the converter — it does not
+need the pre-built SDK models. If disk space is tight, delete
+`work/ai-sdk/ZIFENG278-ai-sdk/models/` and the converter will recreate the
+subdirectories it needs.
+
+## Step 4: SSH access to the board
 
 For board automation from the host, the host scripts use Paramiko for
 SSH/SFTP. The helper is:
@@ -73,7 +101,7 @@ Alternatively, use `scp` directly to upload NBG packages:
 scp -r work/model-packages/my_model/int16/ user@board:~/
 ```
 
-## Step 4: Converting ONNX to NBG
+## Step 5: Converting ONNX to NBG
 
 The main conversion wrapper is `scripts/host/convert_onnx_to_nbg.sh`. It runs
 inside the ACUITY Docker container and performs:
@@ -139,7 +167,7 @@ scripts/host/convert_onnx_to_nbg.sh \
   --outputs logits
 ```
 
-## Step 5: Host oracle gate
+## Step 6: Host oracle gate
 
 Before uploading an NBG to the board, compare ACUITY host output against the
 CPU FP reference:
@@ -170,7 +198,7 @@ The comparison tool reports:
 
 A pass threshold of cosine > 0.99 with top-1 match is used for the host gate.
 
-## Step 6: Generating ONNX graphs
+## Step 7: Generating ONNX graphs
 
 The real LLM ONNX generator is `scripts/host/make_real_llm_onnx.py`. It reads
 a Hugging Face model directory (`config.json` + `model.safetensors`) and builds
@@ -206,7 +234,7 @@ docker run --rm -v "$PWD:/workspace" -w /workspace ubuntu-npu:v2.0.10.1 \
 | `make_tiny_vlm_bridge_onnx.py` | VLM bridge (image embed + tokens → logits) |
 | `make_real_llm_onnx.py` | Real full-depth LLM (SmolLM2, Qwen) |
 
-## Step 7: Board upload
+## Step 8: Board upload
 
 Upload the NBG package to the board:
 
