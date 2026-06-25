@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Text Chat — CLI conversation on Orange Pi Zero 3W.
+LLM Text Chat -- CLI conversation on Orange Pi Zero 3W.
 Pure terminal, no web server. Uses llama.cpp with Qwen2.5 models.
 
 Usage:
@@ -79,7 +79,7 @@ def _count_tokens(text):
 
 
 def _print_startup(cfg, cores):
-    print(f"LLM Chat — {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
+    print(f"LLM Chat -- {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
     print(f"Cores: {cores} | Context: {cfg['ctx']} | {_ram_info()}")
     print("Type /exit to quit, /reset to clear history.")
     print()
@@ -90,7 +90,7 @@ def chat_one_shot(question, model_name, max_tokens, temp, cores):
     if not cfg["gguf"].exists():
         raise FileNotFoundError(f"GGUF not found: {cfg['gguf']}")
 
-    print(f"LLM Chat — {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
+    print(f"LLM Chat -- {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
     print(f"Q: {question}")
     print()
 
@@ -293,7 +293,7 @@ def chat_interactive(model_name, max_tokens, temp, cores):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LLM Text Chat — CLI conversation on Orange Pi Zero 3W",
+        description="LLM Text Chat -- CLI conversation on Orange Pi Zero 3W",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

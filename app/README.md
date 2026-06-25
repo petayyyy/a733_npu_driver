@@ -1,7 +1,7 @@
 # CLI Chat Tools
 
 Terminal-only tools for VLM image chat and LLM text chat on Orange Pi Zero 3W.
-No web server, no browser — just SSH in and run.
+No web server, no browser -- just SSH in and run.
 
 ## VLM — Image Chat
 

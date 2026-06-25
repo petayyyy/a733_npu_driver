@@ -125,7 +125,7 @@ python3 app/llm_chat.py --model qwen-3b
 
 ```
 $ python3 app/vlm_chat.py --image test_images/dog.jpg -q "Describe this image."
-VLM Chat — SmolVLM-256M CPU | ~52 tok/s | ~634 MB
+VLM Chat -- SmolVLM-256M CPU | ~52 tok/s | ~634 MB
 Image: dog.jpg | Q: Describe this image.
 
 A white fluffy dog is sitting on a lush green grassy area. The dog appears to
@@ -139,7 +139,7 @@ shows some greenery and what appears to be a fence.
 
 ```
 $ python3 app/vlm_chat.py --image test_images/dog.jpg -q "What animal?" --backend npu
-VLM Chat — SmolVLM-256M NPU | ~52 tok/s | ~634 MB
+VLM Chat -- SmolVLM-256M NPU | ~52 tok/s | ~634 MB
 Image: dog.jpg | Q: What animal?
 
 [NPU vision: 5959ms]
@@ -152,7 +152,7 @@ A white dog is sitting on the grass.
 
 ```
 $ python3 app/llm_chat.py -q "What is the capital of France?"
-LLM Chat — Qwen2.5-1.5B Q4_K_M | ~8.5 tok/s | ~2.0 GB
+LLM Chat -- Qwen2.5-1.5B Q4_K_M | ~8.5 tok/s | ~2.0 GB
 Q: What is the capital of France?
 
 The capital of France is Paris.
@@ -164,7 +164,7 @@ The capital of France is Paris.
 
 ```
 $ python3 app/vlm_chat.py --image test_images/dog.jpg
-VLM Chat — SmolVLM-256M CPU | ~52 tok/s | ~634 MB
+VLM Chat -- SmolVLM-256M CPU | ~52 tok/s | ~634 MB
 Image: dog.jpg | Type questions, /exit to quit, /image <path> to change
 
 A white fluffy dog sitting on green grass. There are plants and a wooden fence
@@ -187,7 +187,7 @@ A cat sitting on a stone wall with bare trees in the background.
 
 ```
 $ python3 app/llm_chat.py
-LLM Chat — Qwen2.5-1.5B Q4_K_M | ~8.5 tok/s | ~2.0 GB
+LLM Chat -- Qwen2.5-1.5B Q4_K_M | ~8.5 tok/s | ~2.0 GB
 Cores: 6-7 | Context: 8192 | RAM 241/5853 MB used
 Type /exit to quit, /reset to clear history.
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-VLM Image Chat — CLI tool for image+text conversations on Orange Pi Zero 3W.
+VLM Image Chat -- CLI tool for image+text conversations on Orange Pi Zero 3W.
 Pure terminal, no web server.
 
 Backends:
-  cpu  — SmolVLM on CPU via llama.cpp (fast, recommended, ~52 tok/s)
-  npu  — NPU vision offload (V2d) + CPU LLM (frees A76 cores, ~6s vision)
+  cpu  -- SmolVLM on CPU via llama.cpp (fast, recommended, ~52 tok/s)
+  npu  -- NPU vision offload (V2d) + CPU LLM (frees A76 cores, ~6s vision)
 
 Usage:
   python3 vlm_chat.py --image dog.jpg                           # interactive REPL
@@ -168,7 +168,7 @@ def chat_cpu_interactive(image, model_name, max_tokens, temp):
     if not cfg["mmproj"].exists():
         raise FileNotFoundError(f"mmproj not found: {cfg['mmproj']}")
 
-    print(f"VLM Chat — {cfg['label']} CPU | {cfg['speed']} | {cfg['rss']}")
+    print(f"VLM Chat -- {cfg['label']} CPU | {cfg['speed']} | {cfg['rss']}")
     print(f"Image: {image.name} | Type questions, /exit to quit, /image <path> to change")
     print()
 
@@ -396,7 +396,7 @@ def chat_npu_one_shot(image, question, model_name, max_tokens, temp):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="VLM Image Chat — CLI image+text conversation on Orange Pi Zero 3W",
+        description="VLM Image Chat -- CLI image+text conversation on Orange Pi Zero 3W",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -442,7 +442,7 @@ Examples:
 
     if args.question:
         # one-shot
-        print(f"VLM Chat — {cfg['label']} {args.backend.upper()} | {cfg['speed']} | {cfg['rss']}")
+        print(f"VLM Chat -- {cfg['label']} {args.backend.upper()} | {cfg['speed']} | {cfg['rss']}")
         print(f"Image: {image.name} | Q: {args.question}")
         print()
 
