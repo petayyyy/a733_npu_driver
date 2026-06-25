@@ -1325,6 +1325,38 @@ V2 gate blocked: SmolVLM vision encoder cannot convert to NBG (ACUITY NonZero + 
   - NBG: `work/model-packages/smolvlm_256m_vision_v2d/int16/`.
   - Board NBG: `/home/orangepi/a733_npu_driver/models/smolvlm_256m_vision_v2d_int16/`.
 
+## 2026-06-25 (continued)
+
+- Task B5-qwen-size-sweep completed on Orange Pi Zero 3W at `192.168.31.225`.
+  - Verified board was idle before runs; killed another agent's hung llama-cli processes.
+  - Downloaded Qwen2.5 GGUF models from HF: 0.5B Q4_K_M (469MB), 0.5B Q8_0 (645MB),
+    1.5B Q4_K_M (1.1GB), 1.5B Q8_0 (1.8GB), 3B Q4_K_M (2.0GB).
+  - 7B Q4_K_M not in HF GGUF repo; Q2_K download stopped (disk 90%).
+  - Ran fit tests for all 5 models at ctx=2048. All 5 fit. 7B marked "does not fit."
+  - Ran full 9-config core sweeps (same as B4b: taskset affinity, pidstat, mpstat,
+    RSS sampling, thermals) for all 5 models — 45 benchmark runs + 5 fit tests.
+  - Verified all 50 runs exit code 0.
+  - Final results:
+    - 0.5B Q4_K_M: best decode 2xA76=17.83 tok/s, RSS 624 MiB
+    - 0.5B Q8_0: best decode 2xA76=17.49 tok/s, RSS 1.1 GiB (matches B4b)
+    - 1.5B Q4_K_M: best decode 2xA76=8.46 tok/s, RSS 2.0 GiB
+    - 1.5B Q8_0: best decode 1xA76=5.02 tok/s (2xA76=4.79 — WORSE! Memory saturated)
+    - 3B Q4_K_M: best decode 2xA76=4.03 tok/s, RSS 3.8 GiB (loads, barely interactive)
+  - Key findings:
+    - 1xA76 = 4xA55 for 1.5B Q4_K_M decode (5.71 vs 5.40). A76 efficiency holds.
+    - 1.5B Q8_0: single A76 beats dual A76 — memory bandwidth fully saturated.
+    - 3B loads on 5.7 GiB RAM but not recommended for interactive use (<4 tok/s).
+    - 7B does not fit on this board.
+  - Recommendations:
+    - Max speed: 0.5B Q8_0 2xA76 (17.49 tok/s, 4.5 GiB free)
+    - Best intelligence: 1.5B Q4_K_M 2xA76 (8.46 tok/s, 3.6 GiB free)
+    - ROS2 concurrency: 0.5B Q8_0 1xA76 (16.28 tok/s, frees 1 A76 + 6 A55)
+  - Report: `reports/b5-qwen-size-sweep.md`.
+  - Board logs: `/home/orangepi/a733_npu_driver/logs/b5-sweep/`.
+  - Scripts: `scripts/board/b5_sweep.sh`, `b5_bench.sh`, `b5_download.sh`.
+  - Verified Orange Pi clean after: no screen sessions, no llama/wget processes,
+    `/dev/vipcore` no users.
+
 ## Next Gate
 
 Hybrid VLM with NPU vision offload is a PROVEN deliverable. SmolVLM vision
