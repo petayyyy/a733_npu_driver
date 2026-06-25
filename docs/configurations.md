@@ -21,7 +21,8 @@ Zero 3W (6 GB RAM).
 | Smarter NPU chat (ROS2 safe) | SmolLM2-360M W=32 int16 | NPU | 32 fixed | 8 | [03](03-run-llm-npu.md) |
 | Chat with real context | Qwen2.5-0.5B Q8_0 | CPU (2×A76) | 8k KV-cache | 18 decode | [06](06-cpu-baseline.md) |
 | Long-context retrieval | Qwen2.5-0.5B Q8_0 | CPU (2×A76) | 16k KV-cache | 2.2 decode | [06](06-cpu-baseline.md) |
-| **Image chat (recommended VLM)** | **SmolVLM-256M Q8_0** | CPU (2×A76) | auto | **53** | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
+| **Image chat (CLI app)** | **SmolVLM-256M Q8_0** | CPU or NPU+CPU | auto | **52** | [09](09-vlm-app.md) |
+| Image chat (manual) | SmolVLM-256M Q8_0 | CPU (2×A76) | auto | 53 | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | Higher-detail image chat | SmolVLM-500M Q8_0 | CPU (2×A76) | auto | 22 | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | **Image chat + NPU vision (recommended)** | **SmolVLM-256M hybrid** | NPU vision + CPU LLM | auto | **46.5 tok/s** | [05](05-run-vlm-npu.md) |
 | VLM vision offload (SmolVLM) | SmolVLM SigLIP int16 | NPU only | 1×512×512 | 5,959 ms | [05](05-run-vlm-npu.md) |
