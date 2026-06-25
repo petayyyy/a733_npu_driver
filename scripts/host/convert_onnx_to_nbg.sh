@@ -139,8 +139,8 @@ case "$NAME" in
     *[!A-Za-z0-9_.-]*|"") die "--name must contain only letters, digits, dot, underscore, or dash" ;;
 esac
 case "$QUANT" in
-    uint8|int16|bf16|fp16|pcq) ;;
-    *) die "--quant must be one of: uint8, int16, bf16, fp16, pcq" ;;
+    uint8|int16|bf16|fp16|pcq|perchannel_int16) ;;
+    *) die "--quant must be one of: uint8, int16, bf16, fp16, pcq, perchannel_int16" ;;
 esac
 
 PYTHON=$(find_python) || die "python3 or python is required"
@@ -296,6 +296,27 @@ if [ "$QUANT" = "fp16" ]; then
     echo "\$cmd"
     eval "\$cmd"
     popd
+elif [ "$QUANT" = "perchannel_int16" ]; then
+    pushd "$NAME"
+    PEGASUS=$ACUITY_PATH/pegasus
+    if [ ! -e "\$PEGASUS" ]; then
+        PEGASUS="python3 \$PEGASUS.py"
+    fi
+    cmd="\$PEGASUS quantize \
+        --model         ${NAME}.json \
+        --model-data    ${NAME}.data \
+        --device        CPU \
+        --with-input-meta ${NAME}_inputmeta.yml \
+        --compute-entropy \
+        --rebuild \
+        --model-quantize ${NAME}_int16.quantize \
+        --quantizer perchannel_symmetric_affine \
+        --qtype int16"
+    echo "\$cmd"
+    eval "\$cmd"
+    popd
+    bash pegasus_inference.sh "$NAME" "int16"
+    bash pegasus_export_ovx_nbg.sh "$NAME" "int16" "$TARGET" "$VIV_SDK"
 else
     if [ "$HYBRID" = "1" ]; then
         if [ -z "$HYBRID_SEED_QUANTIZE" ]; then
@@ -319,7 +340,11 @@ MSYS_NO_PATHCONV=1 docker run --rm ${DOCKER_RUN_ARGS:-} \
     "$IMAGE" \
     bash -lc "$CONTAINER_SCRIPT"
 
-"$PYTHON" - "$MODEL_DIR" "$PACKAGE_DIR" "$QUANT" <<'PY'
+PACKAGE_QUANT="$QUANT"
+if [ "$QUANT" = "perchannel_int16" ]; then
+    PACKAGE_QUANT="int16"
+fi
+"$PYTHON" - "$MODEL_DIR" "$PACKAGE_DIR" "$PACKAGE_QUANT" <<'PY'
 from __future__ import annotations
 
 import json

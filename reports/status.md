@@ -1098,3 +1098,51 @@ workspace artifacts.
     ROS2/robotics when paused.
   - Report added: `reports/b4b-cpu-utilization.md`.
   - Raw logs: `/home/orangepi/a733_npu_driver/logs/board/b4b-cpu-utilization/`.
+
+## 2026-06-25
+
+- Task Q1-qwen-int8-gates started and completed. Host-only ACUITY experiments;
+  Orange Pi board at `192.168.31.225` was not accessed (no gate passed).
+  - Gate A -- Per-channel INT16: **CONFIRMED DEAD END**.
+    - Generated chunked-lm-head Qwen2.5-0.5B W=32 ONNX with
+      `--lm-head-chunk-size 50646` (3 chunks).
+    - Pegasus rejects `perchannel_symmetric_affine --qtype int16`:
+      `valid quantize qtype for quantizer 'perchannel_symmetric_affine', in ['int8', 'int4']`.
+    - This is a toolchain limitation, not chip-gating (INT16 per-channel is not
+      supported at all in ACUITY 6.30.22).
+    - Log: `logs/host/q1-gatea-perchannel-int16-convert.log`.
+  - Gate B -- W8A16 SmoothQuant alpha sweep: **FAILS host quality gate**.
+    - Generated 12-window Qwen calibration dataset.
+    - Collected SmoothQuant scales for alphas 0.2, 0.5, 0.7 using
+      `make_real_llm_smoothquant_scales.py` (96 scale vectors, 24 layers).
+    - Built smoothed ONNX for all three alphas with chunked lm_head.
+    - Alpha "none" W8A16 tested on non-chunked ONNX (uses existing 440KB int16
+      quantize table). Result: host cosine **0.079**, top-1 mismatch (16 vs 198).
+      Far below the 0.90 gate.
+    - Smoothed chunked W8A16 variants blocked by the known ACUITY quantize-table
+      serialization bug (`.quantize` truncated to 0 bytes for full Qwen chunked
+      graphs). This is the same bug reported at
+      `reports/t6-vendor-acuity-hybrid-quantize-table.md`.
+    - Prior T7 data (alpha=0.5, non-chunked, W8A16) also fails: cosine 0.254.
+    - The W8A16 quality ceiling appears to be ~0.25 cosine regardless of alpha,
+      fundamentally limited by Qwen's activation outlier magnitude (act_absmax ~1790)
+      with INT8 weight quantization.
+    - Log: `logs/host/q1-gateb-none-w8a16-infer.log`.
+  - Project decision: both Q1 gates fail. The integer-only NPU path for
+    Qwen2.5-0.5B is not viable with ACUITY 6.30.22. Hybrid CPU-LLM + NPU-vision
+    becomes the recommended path.
+  - Report added: `reports/q1-qwen-int8-gates.md`.
+  - Cleanup: removed ~13 GB of rebuildable Q1 artifacts
+    (qwen25_05b_w32_debug, qwen25_05b_w32_q1_*, chunked ACUITY workspace).
+  - Updated confirmed-dead-ends list:
+    - Per-channel INT16 (Gate A, new)
+    - W8A16 quality fails at all tested SmoothQuant alphas (Gate B + T7)
+    - ACUITY quantize-table serialization: full Qwen chunked ONNX produces
+      0-byte `.quantize` file (T4/T7/Q1)
+
+## Next Gate
+
+Hybrid CPU-LLM + NPU-vision is the path for Qwen2.5-0.5B. The NPU remains
+valid for vision encoders (MobileCLIP-S0 proven at 22.6ms on NPU) and for
+smaller LLMs (SmolLM2-135M W=32 int16 proven coherent on Orange Pi NPU at
+21 tok/s). Qwen2.5-0.5B decode on CPU is the viable path documented in B4b.
