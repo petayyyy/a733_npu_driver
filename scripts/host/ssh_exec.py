@@ -50,9 +50,15 @@ def run_command(client: paramiko.SSHClient, command: str, timeout: int, get_pty:
     stdin.close()
 
     for line in stdout:
-        print(line, end="")
+        try:
+            print(line, end="")
+        except UnicodeEncodeError:
+            print(line.encode("ascii", errors="replace").decode("ascii"), end="")
     for line in stderr:
-        print(line, end="", file=sys.stderr)
+        try:
+            print(line, end="", file=sys.stderr)
+        except UnicodeEncodeError:
+            print(line.encode("ascii", errors="replace").decode("ascii"), end="", file=sys.stderr)
 
     status = stdout.channel.recv_exit_status()
     print(f"[remote-exit] {status}", flush=True)

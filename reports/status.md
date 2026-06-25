@@ -1164,6 +1164,35 @@ workspace artifacts.
   - Report added: `reports/q2-qwen-block-nbg.md`.
   - Changes: `scripts/host/make_real_llm_onnx.py` (+150 lines for block/emb/final export).
 
+- Task V1-hybrid-vlm-cpu completed on Orange Pi Zero 3W at `192.168.31.225`.
+  - Verified llama.cpp at commit `be4a6a6` with multimodal (mmproj) support;
+    `llama-cli` accepts `--mmproj`, `--image`, `--chat-template`.
+  - Downloaded SmolVLM-256M-Instruct Q8_0 GGUF + mmproj from
+    `ggml-org/SmolVLM-256M-Instruct-GGUF`: text 167 MB + mmproj 99 MB = 266 MB.
+  - Downloaded SmolVLM-500M-Instruct Q8_0 GGUF + mmproj from
+    `ggml-org/SmolVLM-500M-Instruct-GGUF`: text 426 MB + mmproj 106 MB = 532 MB.
+  - Verified SmolVLM-256M Q8_0 on 3 test images (dog.jpg, cat.jpg, test-1.jpeg):
+    all 3 answers are ACCURATE image descriptions.
+    - dog.jpg: "white fluffy dog sitting on a lush green grassy area" -- correct.
+    - cat.jpg: "cat sitting on a stone or concrete surface... fur is a mix of
+      brown and black, with distinct stripes" -- correct.
+    - test-1.jpeg: "newspaper clipping... 'MEN WALK ON MOON'" -- correct.
+  - Verified SmolVLM-256M metrics:
+    prompt 12.5 t/s, generation 52.6 t/s, peak RSS 634 MB,
+    free RAM before 2957 MB, after 2958 MB (model released).
+  - Verified SmolVLM-500M Q8_0 on dog.jpg: ACCURATE ("white fluffy dog... large
+    breed, likely Husky or Samoyed"), prompt 11.8 t/s, generation 22.3 t/s
+    (2.4x slower than 256M).
+  - InternVL3-1B-Instruct GGUF available at `ggml-org/InternVL3-1B-Instruct-GGUF`
+    but not tested; nanoLLaVA fp16 (2 GB disk) too large for this board.
+  - Winner: SmolVLM-256M-Instruct Q8_0 (best speed, accurate, lowest RAM).
+    Leaves ~2.3 GB RAM for picoclaw/ROS2.
+  - Report added: `reports/v1-hybrid-vlm-cpu.md`.
+  - Patched `scripts/host/ssh_exec.py` to handle UnicodeEncodeError from llama.cpp
+    loading spinner characters on Windows cp1252 console.
+  - Board logs: `/home/orangepi/a733_npu_driver/logs/v1-vlm/smolvlm256_*`.
+  - Benchmark script: `scripts/board/bench_vlm_v2.sh`.
+
 ## Next Gate
 
 Q2 Gate 2 continuation: compile all 26 NBGs, implement Multi-Graph chained runner,
@@ -1171,3 +1200,7 @@ validate full-model coherence on host then Orange Pi.
 
 NPU-vision remains valid (MobileCLIP-S0 at 22.6ms). SmolLM2-135M int16 runs on
 Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM path.
+
+V1 gate passed: SmolVLM-256M-Instruct Q8_0 is the runnable CPU VLM for the
+Orange Pi Zero 3W. Next VLM step is vision-on-NPU offload (mobileclip_s0 encoder
+already verified at 22.6ms on NPU in B3).
