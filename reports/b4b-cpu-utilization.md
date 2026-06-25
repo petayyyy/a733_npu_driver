@@ -44,6 +44,8 @@ filling the filesystem (a previous run produced a 9.9 GB stdout.log).
 |----|---------|-----------|--------------|-------------|----------|-----------|-------------|----------|----------|
 | 1  | 0       | A55       | 18.18        | 6.33        | ~100%    | 100%      | 13%         | 1,188 MiB | 80.5°C |
 | 2  | 0,1     | 2×A55     | 36.68        | 10.73       | ~199%    | 200%      | 25%         | 1,195 MiB | 81.1°C |
+| 3  | 0-2     | 3×A55     | 54.67        | 13.66       | ~300%    | 300%      | 38%         | 1,189 MiB | 81.8°C |
+| 4  | 0-3     | 4×A55     | 71.42        | 14.82       | ~398%    | 400%      | 50%         | 1,198 MiB | 82.4°C |
 | 1  | 6       | A76       | 64.76        | 16.54       | ~100%    | 100%      | 13%         | 1,106 MiB | 78.6°C |
 | 2  | 6,7     | 2×A76     | 128.74       | **18.03**   | ~199%    | 200%      | 25%         | 1,109 MiB | 79.2°C |
 | 4  | 4-7     | 2×A76+2×A55 | 129.55     | 16.77       | ~391%    | 399%      | 49%         | 1,141 MiB | 82.7°C |
@@ -67,8 +69,14 @@ All values verified/measured on hardware.
   single A55 does NOT saturate memory bandwidth — the second A55 core finds
   unused bandwidth, nearly doubling throughput. Two A55 (10.73) still lose to
   one A76 (16.54).
-- **A55 pair (4,5) implicitly tested in t=4:** prefill barely budges vs t=2
-  (129.55 vs 128.74), confirming A55 cores add little to memory-bound decode.
+- **A55 scaling 1→2→3→4:** 6.33 → 10.73 → 13.66 → 14.82 tok/s. Diminishing
+  returns: +70%, +27%, +8%. By 3×A55 (13.66), bandwidth saturation kicks in;
+  4×A55 (14.82) is close to 1×A76 (16.54) — four slow cores nearly match one
+  fast core in memory-bound decode.
+- **4×A55 (14.82) vs 8×all (13.70):** pure A55 is faster than mixing A76+A55
+  for decode. Adding A76 cores to A55 creates bus contention — the A76 cores
+  dominate the memory controller, A55s stall, and the overhead of 8 threads
+  hurts more than the extra compute helps.
 
 ### Notes
 
@@ -89,6 +97,8 @@ All values verified/measured on hardware.
 |----|-------------|------------|
 | 1 A55 | 0 | Core 0 ~100%, others idle |
 | 2 A55 | 0,1 | Both cores ~100%, others idle |
+| 3 A55 | 0-2 | All 3 cores ~100%, others idle |
+| 4 A55 | 0-3 | All 4 cores ~98-100%, others idle |
 | 1 A76 | 6 | Core 6 ~100%, others idle |
 | 2  | 6,7 (A76)   | Core 6 ~100%, core 7 ~0-100% intermittent |
 | 4  | 4-7         | All 4 cores ~92-100% |
@@ -97,10 +107,10 @@ All values verified/measured on hardware.
 
 ## Thermals
 
-| Zone | t=1 A55 | t=2 A55 | t=1 A76 | t=2 | t=4 | t=6 | t=8 |
-|------|---------|---------|---------|-----|-----|-----|-----|
-| zone0 | 80.5°C | 81.1°C | 78.6°C | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
-| zone3 | 75.1°C | 76.3°C | 75.8°C | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
+| Zone | t=1 A55 | t=2 A55 | t=3 A55 | t=4 A55 | t=1 A76 | t=2 | t=4 | t=6 | t=8 |
+|------|---------|---------|---------|---------|---------|-----|-----|-----|-----|
+| zone0 | 80.5°C | 81.1°C | 81.8°C | 82.4°C | 78.6°C | 77.4°C | 82.0°C | 83.1°C | 82.8°C |
+| zone3 | 75.1°C | 76.3°C | 77.0°C | 77.8°C | 75.8°C | 79.2°C | 82.7°C | 84.5°C | 83.8°C |
 
 All within safe range. No throttling observed.
 
@@ -128,7 +138,7 @@ availability.
 
 ## Verification
 
-- All 7 runs (t=1 A55, t=2 A55, t=1 A76, t=2 A76, t=4, t=6, t=8) completed with exit code 0.
+- All 9 runs (t=1/2/3/4 A55, t=1/2 A76, t=4/6/8 mixed) completed with exit code 0.
 - llama-completion perf timings extracted from stderr.log.
 - pidstat %CPU values extracted from pidstat.log.
 - RSS peak computed from rss.log sampling at 0.2s intervals.
