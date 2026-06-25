@@ -21,10 +21,11 @@ Zero 3W (6 GB RAM).
 | Smarter NPU chat (ROS2 safe) | SmolLM2-360M W=32 int16 | NPU | 32 fixed | 8 | [03](03-run-llm-npu.md) |
 | Chat with real context | Qwen2.5-0.5B Q8_0 | CPU (2×A76) | 8k KV-cache | 18 decode | [06](06-cpu-baseline.md) |
 | Long-context retrieval | Qwen2.5-0.5B Q8_0 | CPU (2×A76) | 16k KV-cache | 2.2 decode | [06](06-cpu-baseline.md) |
-| **Image chat (CLI app)** | **SmolVLM-256M Q8_0** | CPU or NPU+CPU | auto | **52** | [09](09-vlm-app.md) |
+| **Image chat (CLI app)** | **SmolVLM-256M Q8_0** | CPU or NPU+CPU | auto | **52** | [09](09-cli-tools.md) |
+| **Text chat (CLI app)** | **Qwen2.5-1.5B Q4_K_M** | CPU (2xA76) | 8k | **8.5** | [09](09-cli-tools.md) |
 | Image chat (manual) | SmolVLM-256M Q8_0 | CPU (2×A76) | auto | 53 | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | Higher-detail image chat | SmolVLM-500M Q8_0 | CPU (2×A76) | auto | 22 | [06](06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
-| **Image chat + NPU vision (recommended)** | **SmolVLM-256M hybrid** | NPU vision + CPU LLM | auto | **46.5 tok/s** | [05](05-run-vlm-npu.md) |
+| **Image chat + NPU vision (recommended)** | **SmolVLM-256M hybrid** | NPU vision + CPU LLM | auto | **46.5 tok/s** | [09](09-cli-tools.md) |
 | VLM vision offload (SmolVLM) | SmolVLM SigLIP int16 | NPU only | 1×512×512 | 5,959 ms | [05](05-run-vlm-npu.md) |
 | VLM vision offload (MobileCLIP) | MobileCLIP-S0 | NPU only | 1×256×256 | 22.6 ms | [05](05-run-vlm-npu.md) |
 | NPU-only more context | SmolLM2-135M W=64 int16 | NPU | 64 fixed | 14 | [03](03-run-llm-npu.md) |
@@ -72,31 +73,32 @@ No KV-cache → full recompute per token → O(W²) throughput.
 
 ## Commands
 
-### NPU: SmolLM2-135M chat shell
+### VLM: Image chat (CLI tool)
 ```bash
-cd /home/orangepi/a733_npu_driver
-python3 scripts/board/chat_shell.py \
-  --model models/smollm2_135m_w32_int16/network_binary.nb \
-  --tokenizer work/models/smollm2-135m-instruct \
-  --runner build/npu_lm_runner \
-  --vip-lib /home/orangepi/lib \
-  --window 32 --greedy
+cd ~/a733_npu_driver
+
+# CPU mode (default, recommended)
+python3 app/vlm_chat.py --image test_images/dog.jpg -q "Describe this image."
+
+# NPU-vision-offload mode
+python3 app/vlm_chat.py --image test_images/dog.jpg -q "What animal?" --backend npu
+
+# Interactive REPL
+python3 app/vlm_chat.py --image test_images/dog.jpg
 ```
 
-### CPU: Qwen Q8_0 8k context
+### LLM: Text chat (CLI tool)
 ```bash
-taskset -c 6,7 ~/llama.cpp/build/bin/llama-completion \
-  -m qwen2.5-0.5b-instruct-q8_0.gguf \
-  -c 8192 -t 2 -ngl 0 --no-warmup --temp 0
-```
+cd ~/a733_npu_driver
 
-### CPU: SmolVLM-256M image chat
-```bash
-printf '/image dog.jpg\nDescribe this image.\n/exit\n' | \
-  taskset -c 6,7 ~/llama.cpp/build/bin/llama-cli \
-  -m smolvlm-256m-instruct-q8_0.gguf \
-  --mmproj smolvlm-256m-instruct-mmproj-q8_0.gguf \
-  -c 4096 -t 2 -ngl 0 --simple-io --no-perf --log-disable
+# Interactive REPL (qwen-1.5b default)
+python3 app/llm_chat.py
+
+# One-shot
+python3 app/llm_chat.py -q "Explain quantum computing."
+
+# Faster model
+python3 app/llm_chat.py --model qwen-0.5b
 ```
 
 ### Hybrid: SmolVLM with NPU vision offload

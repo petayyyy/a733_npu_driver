@@ -63,18 +63,21 @@ Vendor tickets: **[docs/vendor-tickets.md](docs/vendor-tickets.md)**.
 1. **Set up the host** — [docs/01-setup-host.md](docs/01-setup-host.md)
 2. **Bring up the board NPU** — [docs/02-board-bringup.md](docs/02-board-bringup.md)
 3. **Pick a configuration** — [docs/configurations.md](docs/configurations.md)
-4. **Read the honest limits** — [docs/08-known-limits-and-blockers.md](docs/08-known-limits-and-blockers.md)
-5. **File vendor tickets** — [docs/vendor-tickets.md](docs/vendor-tickets.md)
+4. **Run CLI chat tools** — [docs/09-cli-tools.md](docs/09-cli-tools.md)
+5. **Read the honest limits** — [docs/08-known-limits-and-blockers.md](docs/08-known-limits-and-blockers.md)
+6. **File vendor tickets** — [docs/vendor-tickets.md](docs/vendor-tickets.md)
 
 Then follow the run guide for your use case:
 
 | Goal | Guide |
 |---|---|
+| **VLM image chat (CLI)** | [app/README.md](app/README.md) — `python3 app/vlm_chat.py --image dog.jpg` |
+| **LLM text chat (CLI)** | [app/README.md](app/README.md) — `python3 app/llm_chat.py` |
+| Install everything from scratch | [docs/09-cli-tools.md](docs/09-cli-tools.md) |
 | Chat with SmolLM2 on NPU | [docs/03-run-llm-npu.md](docs/03-run-llm-npu.md) |
 | Interactive chat shell on board | [docs/04-chat-shell.md](docs/04-chat-shell.md) |
 | Run MobileCLIP vision encoder on NPU | [docs/05-run-vlm-npu.md](docs/05-run-vlm-npu.md) |
 | Run Qwen on CPU with real KV-cache | [docs/06-cpu-baseline.md](docs/06-cpu-baseline.md) |
-| Run VLM image chat (CLI app) | [docs/09-vlm-app.md](docs/09-vlm-app.md) |
 | Run SmolVLM image chat on CPU | [docs/06-cpu-baseline.md](docs/06-cpu-baseline.md#smolvlm-image-chat-on-cpu) |
 | Port from Radxa to Orange Pi | [docs/07-porting-radxa-to-orangepi.md](docs/07-porting-radxa-to-orangepi.md) |
 | Understand limits and blockers | [docs/08-known-limits-and-blockers.md](docs/08-known-limits-and-blockers.md) |
@@ -82,6 +85,7 @@ Then follow the run guide for your use case:
 ## Repository layout
 
 ```text
+app/                — CLI chat tools (VLM image chat, LLM text chat)
 docs/               — Task-oriented guides, reference, configurations, blocker list
 scripts/
   host/             — x86 tools (ONNX gen, ACUITY convert, compare, SSH)
@@ -117,24 +121,28 @@ DOCKER_RUN_ARGS="--cpus 10 --memory 24g" \
     --outputs logits
 ```
 
-## Quick board: NPU chat
+## Quick board: VLM image chat
 
 ```bash
 cd ~/a733_npu_driver
-python3 scripts/board/chat_shell.py \
-  --model models/smollm2_135m_w32_int16/network_binary.nb \
-  --tokenizer work/models/smollm2-135m-instruct \
-  --runner build/npu_lm_runner \
-  --vip-lib /home/orangepi/lib \
-  --window 32 --greedy
+
+# CPU mode (default, recommended)
+python3 app/vlm_chat.py --image test_images/dog.jpg -q "Describe this image."
+
+# NPU-vision-offload mode (frees CPU cores)
+python3 app/vlm_chat.py --image test_images/dog.jpg -q "What animal?" --backend npu
 ```
 
-## Quick board: CPU Qwen
+## Quick board: LLM text chat
 
 ```bash
-taskset -c 6,7 llama-completion \
-  -m qwen2.5-0.5b-instruct-q8_0.gguf \
-  -c 8192 -t 2 -ngl 0 --no-warmup --temp 0
+cd ~/a733_npu_driver
+
+# Interactive REPL (qwen-1.5b default)
+python3 app/llm_chat.py
+
+# One-shot
+python3 app/llm_chat.py -q "Explain quantum computing."
 ```
 
 ## Project Conclusions

@@ -1,360 +1,329 @@
 #!/usr/bin/env python3
 """
-V4 LLM Chat — text conversation on A733 / Orange Pi Zero 3W.
-
-Backends:
-  npu — SmolLM2-135M / 360M on NPU via npu_lm_runner (protocol mode)
-  cpu — Qwen2.5-0.5B on CPU via llama.cpp (real KV-cache, 8K context)
+LLM Text Chat — CLI conversation on Orange Pi Zero 3W.
+Pure terminal, no web server. Uses llama.cpp with Qwen2.5 models.
 
 Usage:
-  python3 llm_chat.py -p "Explain quantum computing in one sentence."
-  python3 llm_chat.py --backend cpu --model Qwen2.5-0.5B -p "Hello"
-  python3 llm_chat.py --cpu-only -p "Tell me a joke"
+  python3 llm_chat.py                              # interactive REPL (qwen-1.5b default)
+  python3 llm_chat.py --question "What is Python?"  # one-shot
+  python3 llm_chat.py --model qwen-0.5b             # faster model
+  python3 llm_chat.py --model qwen-3b               # experimental, slow
+  python3 llm_chat.py --cores 0-3                   # override A76 pinning
 """
-import argparse, os, re, struct, subprocess, sys, time, json, math
+import argparse
+import os
+import re
+import select
+import subprocess
+import sys
+import time
 from pathlib import Path
-from typing import Iterator
 
-# ── paths ──────────────────────────────────────────────────────────────
-HOME      = Path.home()
-REPO      = HOME / "a733_npu_driver"
-BUILD     = REPO / "build"
+HOME = Path.home()
+REPO = HOME / "a733_npu_driver"
 LLAMA_BIN = HOME / "llama.cpp/build/bin"
-VIP_LIB   = HOME / "lib"
+LLAMA_CLI = LLAMA_BIN / "llama-cli"
 
 MODELS = {
-    "SmolLM2-135M": {
-        "backend":  "npu",
-        "nbg":      REPO / "models/smollm2_135m_w32_int16/network_binary.nb",
-        "tokenizer": REPO / "work/models/smollm2-135m-instruct/tokenizer.json",
-        "vocab": 49152, "window": 32,
-        "speed": "~21 tok/s", "rss": "~272 MB",
-        "desc": "NPU, fast, coherent short answers",
+    "qwen-0.5b": {
+        "gguf": REPO / "models/qwen2.5-0.5b-instruct-q8_0.gguf",
+        "speed": "~18 tok/s",
+        "rss": "~1.1 GB",
+        "label": "Qwen2.5-0.5B Q8_0",
+        "ctx": 8192,
     },
-    "SmolLM2-360M": {
-        "backend":  "npu",
-        "nbg":      REPO / "models/smollm2_360m_w32_int16/network_binary.nb",
-        "tokenizer": REPO / "work/models/smollm2-360m-instruct/tokenizer.json",
-        "vocab": 49152, "window": 32,
-        "speed": "~8 tok/s", "rss": "~646 MB",
-        "desc": "NPU, smarter, slower",
+    "qwen-1.5b": {
+        "gguf": REPO / "models/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "speed": "~8.5 tok/s",
+        "rss": "~2.0 GB",
+        "label": "Qwen2.5-1.5B Q4_K_M",
+        "ctx": 8192,
     },
-    "Qwen2.5-0.5B": {
-        "backend":  "cpu",
-        "gguf":     REPO / "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "gguf_q8":  REPO / "models/qwen2.5-0.5b-instruct-q8_0.gguf",
-        "context": 8192,
-        "speed": "~18 tok/s (Q8_0)", "rss": "~1.1 GB",
-        "desc": "CPU, Qwen2.5, real KV-cache",
+    "qwen-3b": {
+        "gguf": REPO / "models/qwen2.5-3b-instruct-q4_k_m.gguf",
+        "speed": "~4 tok/s",
+        "rss": "~3.7 GB",
+        "label": "Qwen2.5-3B Q4_K_M (EXPERIMENTAL)",
+        "ctx": 4096,
     },
 }
 
-# ═══════════════════════════════════════════════════════════════════════
-#  tokenizer (minimal, no external deps)
-# ═══════════════════════════════════════════════════════════════════════
-
-# ── tokenizer ──────────────────────────────────────────────────────────
-
-try:
-    from tokenizers import Tokenizer as HfTokenizer
-    _HAS_HF_TOKENIZER = True
-except ImportError:
-    _HAS_HF_TOKENIZER = False
+SYSTEM_PROMPT = "You are a helpful AI assistant running on Orange Pi Zero 3W. Keep answers concise."
 
 
-class _SmolTokenizer:
-    """Thin wrapper: HF tokenizers if available, else minimal fallback."""
-
-    def __init__(self, path: Path):
-        if _HAS_HF_TOKENIZER:
-            self._hf = HfTokenizer.from_file(str(path))
-            self._vocab_size = self._hf.get_vocab_size()
-        else:
-            self._hf = None
-            self._vocab_size = 0
-
-    def encode(self, text: str) -> list[int]:
-        if self._hf:
-            return self._hf.encode(text).ids
-        return _fallback_encode(text)
-
-    def decode(self, ids: list[int]) -> str:
-        if self._hf:
-            return self._hf.decode(ids)
-        return _fallback_decode(ids)
-
-
-def _fallback_encode(text: str) -> list[int]:
-    """Minimal fallback using llama-cli tokenization."""
-    import subprocess, tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(text)
-        f.flush()
-        tmp = f.name
-    try:
-        p = subprocess.run(
-            [str(HOME / "llama.cpp/build/bin/llama-cli"),
-             "-m", str(list(MODELS.values())[0].get("nbg", "")) or "/dev/null",
-             "--tokenize", tmp],
-            capture_output=True, text=True, timeout=30, cwd=str(HOME),
-        )
-        # llama-cli --tokenize outputs tokens
-        tokens = []
-        for line in p.stdout.strip().split("\n"):
-            try: tokens.append(int(line.strip()))
-            except: pass
-        return tokens if tokens else []
-    except Exception:
-        return []
-    finally:
-        os.unlink(tmp)
-
-
-def _fallback_decode(ids: list[int]) -> str:
-    return " ".join(str(i) for i in ids)
-
-
-def _ram_info() -> str:
+def _ram_info():
     try:
         with open("/proc/meminfo") as f:
             lines = f.readlines()
         total = int(lines[0].split()[1]) // 1024
         avail = int([l for l in lines if "Available" in l][0].split()[1]) // 1024
-        return f"RAM {total - avail}/{total} MB used ({avail} MB free)"
+        used = total - avail
+        return f"RAM {used}/{total} MB used ({avail} MB free)"
     except Exception:
         return "RAM: unknown"
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  NPU backend (SmolLM2 via npu_lm_runner --protocol)
-# ═══════════════════════════════════════════════════════════════════════
+def _parse_timing(stderr_text):
+    prompt_tps = gen_tps = None
+    m = re.search(r"Prompt:\s*([\d.]+)\s*t/s", stderr_text)
+    if m:
+        prompt_tps = float(m.group(1))
+    m = re.search(r"Generation:\s*([\d.]+)\s*t/s", stderr_text)
+    if m:
+        gen_tps = float(m.group(1))
+    return prompt_tps, gen_tps
 
-def chat_npu(model_name: str, prompt: str, max_tokens: int, temp: float) -> str:
+
+def _count_tokens(text):
+    return len(text.split())
+
+
+def _print_startup(cfg, cores):
+    print(f"LLM Chat — {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
+    print(f"Cores: {cores} | Context: {cfg['ctx']} | {_ram_info()}")
+    print("Type /exit to quit, /reset to clear history.")
+    print()
+
+
+def chat_one_shot(question, model_name, max_tokens, temp, cores):
     cfg = MODELS[model_name]
-    runner_bin = BUILD / "npu_lm_runner"
-    if not runner_bin.exists():
-        raise FileNotFoundError(f"Runner not found: {runner_bin}")
+    if not cfg["gguf"].exists():
+        raise FileNotFoundError(f"GGUF not found: {cfg['gguf']}")
 
-    # build runner command
-    runner_cmd = [
-        str(runner_bin),
-        "--nbg", str(cfg["nbg"]),
-        "--seq-len", str(cfg["window"]),
-        "--vocab", str(cfg["vocab"]),
-        "--temperature", str(temp),
-        "--protocol",
-    ]
-
-    env = {"LD_LIBRARY_PATH": str(VIP_LIB)}
-
-    p = subprocess.Popen(
-        runner_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, env={**os.environ, **env},
-    )
-
-    # wait for READY
-    ready = False
-    for line in p.stdout:
-        if "READY" in line:
-            ready = True
-            break
-        # print stderr startup info
-    if not ready:
-        p.kill()
-        raise RuntimeError("Runner failed to start")
-
-    # load tokenizer
-    tok_path = cfg["tokenizer"]
-    if not tok_path.exists():
-        p.kill()
-        raise FileNotFoundError(f"Tokenizer not found: {tok_path}")
-    tok = _SmolTokenizer(tok_path)
-
-    pad_id = 2     # SmolLM2 pad
-    eos_tokens = {0, 2, 49152, 49153}  # <|endoftext|>, <|im_end|>, and common stops
-
-    # build prompt with chat template
-    chat_prompt = (
-        "<|im_start|>system\n"
-        "You are a helpful AI assistant. Keep answers short.<|im_end|>\n"
-        "<|im_start|>user\n"
-        f"{prompt}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
-    prompt_ids = tok.encode(chat_prompt)
-    window = cfg["window"]
-
-    # sliding window: keep last N tokens
-    if len(prompt_ids) > window:
-        prompt_ids = prompt_ids[-window:]
-    elif len(prompt_ids) < window:
-        # left-pad with pad token
-        prompt_ids = [pad_id] * (window - len(prompt_ids)) + prompt_ids
-
-    # run generation
-    t0 = time.time()
-    answer_pieces: list[str] = []
-    gen_count = 0
-
-    for step in range(max_tokens):
-        run_cmd = "RUN " + " ".join(str(t) for t in prompt_ids) + "\n"
-        p.stdin.write(run_cmd)
-        p.stdin.flush()
-
-        resp = p.stdout.readline().strip()
-        if not resp:
-            break
-
-        if resp.startswith("ERROR"):
-            break
-
-        # parse TOKEN response
-        m = re.search(r"TOKEN id=(\d+)", resp)
-        if not m:
-            break
-        next_id = int(m.group(1))
-
-        if next_id in eos_tokens and gen_count > 3:
-            break
-
-        piece = tok.decode([next_id])
-        answer_pieces.append(piece)
-        sys.stdout.write(piece)
-        sys.stdout.flush()
-        gen_count += 1
-
-        # slide window
-        prompt_ids = prompt_ids[1:] + [next_id]
-
-    # shutdown
-    p.stdin.write("QUIT\n")
-    p.stdin.flush()
-    p.wait(timeout=5)
-    t1 = time.time()
-
-    elapsed = t1 - t0
-    tok_s = gen_count / elapsed if elapsed > 0 else 0
-    print(f"\n-- {model_name} NPU | {gen_count} tokens | wall {elapsed:.1f}s | "
-          f"{tok_s:.0f} tok/s | window {window} | {_ram_info()} | 0 CPU, ROS2 safe")
-    return "".join(answer_pieces)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  CPU backend (Qwen2.5 via llama-completion)
-# ═══════════════════════════════════════════════════════════════════════
-
-def chat_cpu(model_name: str, prompt: str, max_tokens: int, temp: float) -> str:
-    cfg = MODELS[model_name]
-
-    # prefer Q8_0 if available, fall back to Q4_K_M
-    gguf_q8 = cfg.get("gguf_q8")
-    gguf = Path(gguf_q8) if gguf_q8 and Path(gguf_q8).exists() else Path(cfg["gguf"])
-    if not gguf.exists():
-        raise FileNotFoundError(f"GGUF not found: {gguf} (tried Q8 and Q4)")
-
-    llama_bin = LLAMA_BIN / "llama-completion"
-    if not llama_bin.exists():
-        raise FileNotFoundError(f"llama-completion not found: {llama_bin}")
+    print(f"LLM Chat — {cfg['label']} | {cfg['speed']} | {cfg['rss']}")
+    print(f"Q: {question}")
+    print()
 
     cmd = [
-        str(llama_bin),
-        "-m", str(gguf),
-        "-p", prompt,
+        str(LLAMA_CLI),
+        "-m", str(cfg["gguf"]),
+        "-p", question,
         "-n", str(max_tokens),
         "-t", "2",
+        "--cpu-range", cores,
         "--temp", str(temp),
-        "-c", str(cfg["context"]),
-        "-no-cnv",
+        "-c", str(cfg["ctx"]),
+        "--simple-io",
+        "--log-disable",
+        "--single-turn",
+        "--chat-template", "chatml",
     ]
 
     env = {"LD_LIBRARY_PATH": str(LLAMA_BIN)}
     t0 = time.time()
     p = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env={**os.environ, **env},
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, **env},
     )
+    p.stdin.write("/exit\n")
+    p.stdin.close()
 
-    answer_lines: list[str] = []
+    answer_lines = []
+    timing_lines = []
+    in_answer = False
     for line in p.stdout:
         line = line.rstrip("\n\r")
-        if "[end of text]" in line:
+        if "Exiting" in line or "available commands" in line:
             continue
-        if line.strip():
+        if line.startswith("> "):
+            in_answer = True
+            continue
+        if in_answer and line.strip():
+            if line.startswith("[ Prompt:") or line.startswith("[ Generation:"):
+                timing_lines.append(line)
+                continue
             answer_lines.append(line)
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
 
     p.wait()
+    for line in p.stderr:
+        timing_lines.append(line.rstrip("\n\r"))
+
     t1 = time.time()
-
-    # parse timing from stderr
-    stderr_text = p.stderr.read()
-    prompt_tps = gen_tps = None
-    m = re.search(r"prompt eval time.*?(\d+\.?\d*) tokens per second", stderr_text)
-    if m: prompt_tps = float(m.group(1))
-    m = re.search(r"eval time.*?(\d+\.?\d*) tokens per second", stderr_text)
-    if m: gen_tps = float(m.group(1))
-
-    elapsed = t1 - t0
-    print(f"\n-- {model_name} CPU | wall {elapsed:.1f}s", end="")
-    if prompt_tps: print(f" | prompt {prompt_tps:.0f} t/s", end="")
-    if gen_tps: print(f" | gen {gen_tps:.0f} t/s", end="")
-    print(f" | ctx {cfg['context']} | {_ram_info()} | 2xA76, 6 cores free")
+    prompt_tps, gen_tps = _parse_timing("\n".join(timing_lines))
+    print()
+    parts = [f"-- {cfg['label']} | wall {t1 - t0:.1f}s"]
+    if prompt_tps:
+        parts.append(f"prompt {prompt_tps:.0f} t/s")
+    if gen_tps:
+        parts.append(f"gen {gen_tps:.0f} t/s")
+    parts.append(_ram_info())
+    parts.append(f"cores {cores}")
+    print(" | ".join(parts))
     return "\n".join(answer_lines)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  main
-# ═══════════════════════════════════════════════════════════════════════
+def chat_interactive(model_name, max_tokens, temp, cores):
+    cfg = MODELS[model_name]
+    if not cfg["gguf"].exists():
+        raise FileNotFoundError(f"GGUF not found: {cfg['gguf']}")
+
+    _print_startup(cfg, cores)
+
+    cmd = [
+        str(LLAMA_CLI),
+        "-m", str(cfg["gguf"]),
+        "-n", str(max_tokens),
+        "-t", "2",
+        "--cpu-range", cores,
+        "--temp", str(temp),
+        "-c", str(cfg["ctx"]),
+        "--simple-io",
+        "--no-perf",
+        "--log-disable",
+        "--conversation",
+        "--chat-template", "chatml",
+        "--system-prompt", SYSTEM_PROMPT,
+    ]
+
+    env = {"LD_LIBRARY_PATH": str(LLAMA_BIN)}
+    t_start = time.time()
+    p = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, **env},
+    )
+
+    stderr_collector = []
+    token_count = 0
+    turn = 0
+
+    def _read_stderr():
+        while True:
+            r, _, _ = select.select([p.stderr], [], [], 0.05)
+            if not r:
+                break
+            line = p.stderr.readline()
+            if line:
+                stderr_collector.append(line.rstrip("\n\r"))
+
+    def _read_until_idle(timeout=3.0):
+        nonlocal token_count
+        last_read = time.time()
+        generated = 0
+        while True:
+            _read_stderr()
+            r, _, _ = select.select([p.stdout], [], [], 0.1)
+            if r:
+                line = p.stdout.readline()
+                if not line:
+                    if p.poll() is not None:
+                        break
+                    continue
+                line = line.rstrip("\n\r")
+                if line.startswith("[ Prompt:") or line.startswith("[ Generation:"):
+                    continue
+                if line.startswith("> "):
+                    continue
+                if line.strip():
+                    print(line, flush=True)
+                    generated += 1
+                    token_count += _count_tokens(line)
+                    last_read = time.time()
+                continue
+            if time.time() - last_read > timeout:
+                break
+            if p.poll() is not None:
+                break
+        return generated
+
+    # wait for model to load
+    sys.stderr.write("[Loading model...]\n")
+    sys.stderr.flush()
+    _read_until_idle(timeout=0.5)
+    sys.stderr.write("[Ready]\n\n")
+    sys.stderr.flush()
+
+    # initial greeting
+    p.stdin.write("Hello! Introduce yourself briefly.\n")
+    p.stdin.flush()
+    _read_until_idle(timeout=3.0)
+    turn += 1
+
+    while True:
+        try:
+            user_input = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n/exiting...")
+            break
+
+        if not user_input:
+            continue
+        if user_input == "/exit":
+            break
+        if user_input == "/reset":
+            p.stdin.write("/clear\n")
+            p.stdin.flush()
+            token_count = 0
+            turn = 0
+            print("[History cleared]")
+            continue
+
+        p.stdin.write(f"{user_input}\n")
+        p.stdin.flush()
+        turn += 1
+        _read_until_idle(timeout=4.0)
+
+    p.stdin.close()
+    try:
+        p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        p.kill()
+
+    elapsed = time.time() - t_start
+    stderr_text = "\n".join(stderr_collector)
+    prompt_tps, gen_tps = _parse_timing(stderr_text)
+
+    print()
+    parts = [f"-- {cfg['label']} | session {elapsed:.0f}s | {turn} turns"]
+    if gen_tps:
+        parts.append(f"gen {gen_tps:.0f} t/s")
+    parts.append(_ram_info())
+    parts.append(f"cores {cores}")
+    print(" | ".join(parts))
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="V4 LLM Chat — text conversation on A733 / Orange Pi",
+        description="LLM Text Chat — CLI conversation on Orange Pi Zero 3W",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 llm_chat.py -p "Explain quantum computing in one sentence."
-  python3 llm_chat.py --backend cpu --model Qwen2.5-0.5B -p "Hello"
-  python3 llm_chat.py --model SmolLM2-360M -p "Write a haiku about AI"
-  python3 llm_chat.py --cpu-only -p "Tell me a joke"
+  python3 llm_chat.py
+  python3 llm_chat.py --question "What is the capital of France?"
+  python3 llm_chat.py --model qwen-0.5b
+  python3 llm_chat.py --model qwen-3b
+  python3 llm_chat.py --cores 0-3
 """,
     )
-    parser.add_argument("-p", "--prompt", required=True, help="Your question")
-    parser.add_argument("--model", default="SmolLM2-135M",
-                        choices=list(MODELS.keys()),
-                        help="Model (SmolLM2-135M default)")
-    parser.add_argument("--backend", choices=["cpu", "npu"], default=None,
-                        help="Override auto-detected backend")
-    parser.add_argument("--max-tokens", type=int, default=128, help="Max answer tokens")
-    parser.add_argument("--temp", type=float, default=0.0, help="Temperature")
-    parser.add_argument("--cpu-only", action="store_true",
-                        help="Only show CPU models, force CPU backend")
+    parser.add_argument("--question", "-q", default=None,
+                        help="One-shot question (without this, enters interactive REPL)")
+    parser.add_argument("--model", choices=list(MODELS.keys()),
+                        default="qwen-1.5b", help="Model (qwen-1.5b default)")
+    parser.add_argument("--max-tokens", type=int, default=256, help="Max answer tokens")
+    parser.add_argument("--temp", type=float, default=0.7, help="Temperature")
+    parser.add_argument("--cores", default="6-7",
+                        help="CPU core range for affinity (default: 6-7 = A76 only)")
     args = parser.parse_args()
 
-    if args.cpu_only:
-        args.model = "Qwen2.5-0.5B"
+    cfg = MODELS[args.model]
 
-    model_name = args.model
-    if model_name not in MODELS:
-        raise SystemExit(f"Unknown model: {model_name}")
+    if args.model == "qwen-3b":
+        print("[WARNING] qwen-3b is experimental. ~4 tok/s, ~3.7 GB RAM.", file=sys.stderr)
+        print("[WARNING] First load from SD card may take 30-60 seconds.", file=sys.stderr)
 
-    cfg = MODELS[model_name]
-    backend = args.backend or cfg["backend"]
-
-    # validate
-    if backend == "npu":
-        if not cfg.get("nbg") or not Path(cfg["nbg"]).exists():
-            raise SystemExit(f"NBG not found: {cfg.get('nbg')}. Use --cpu-only or pick cpu model.")
-
-    print(f"V4 LLM Chat -- {model_name} | {cfg['speed']} | {cfg['rss']}")
-    print(f"Prompt: {args.prompt}")
-    print(f"Backend: {backend.upper()} | {cfg['desc']}")
-    print()
-
-    if backend == "npu":
-        chat_npu(model_name, args.prompt, args.max_tokens, args.temp)
+    if args.question:
+        chat_one_shot(args.question, args.model, args.max_tokens, args.temp, args.cores)
     else:
-        chat_cpu(model_name, args.prompt, args.max_tokens, args.temp)
+        chat_interactive(args.model, args.max_tokens, args.temp, args.cores)
 
 
 if __name__ == "__main__":
