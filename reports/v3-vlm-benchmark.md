@@ -33,14 +33,16 @@ Compare with V1 SmolVLM-256M on same image:
 
 The 256M provides MORE detail (fluffy, sitting, grass, ears perked) — surprisingly BETTER than 500M for this prompt/image combination.
 
-## InternVL3.5-1B Q4_K_M — DOES NOT FIT
+## InternVL3.5-1B Q4_K_M — LOADS BUT TOO SLOW
 
 - Text model: 462 MB (Q4_K_M)
 - mmproj: 593 MB (f16 — only option from bartowski)
-- Total disk: 1055 MB
-- Runtime RSS exceeds 5.7 GB available RAM → OOM kill during model loading
-- Swap starts thrashing, SSH becomes unresponsive
-- **Verdict: 5.7 GB RAM insufficient for InternVL3.5-1B**
+- Total disk: 1055 MB — fits in 5.7 GB RAM when board is idle (verified)
+- Model loads and image is processed ("Loaded media from dog.jpg" confirmed)
+- **But generation is impractically slow** — >5 min for vision encoding alone
+  on 2×A76 cores; spinner output floods file before answer appears
+- Practical generation speed estimated at <1 tok/s — unusable for interactive chat
+- **Verdict: Technically loads, but too slow for Orange Pi Zero 3W**
 
 ## SmolVLM2-2.2B Q4_K_M — LIKELY TOO BIG
 
