@@ -161,3 +161,58 @@ The host gate is cleared; the remaining risk is the runtime's ability to keep
 - `logs/host/q2-gate1-block0-int16-v2.log` - Block 0 conversion v2 (with inputmeta fix)
 - `work/generated/q2_gate2a/q2_gate2a_simulation.json` - Gate 2A full results
 - `work/generated/q2_gate2a_prompt/q2_gate2a_simulation.json` - Gate 2A prompt results
+- `logs/host/q2-gate2b-block1-int16-convert-retry1.log` - Block 1 ACUITY conversion
+- Board log: `logs/board/q2-gate2b-chain-test.log` - 2-NBG chain on Orange Pi
+
+## Gate 2B -- VIPLite Multi-Graph Chaining (PASSED)
+
+Date: 2026-06-25. Orange Pi Zero 3W at 192.168.31.225.
+
+### Method
+
+1. Block 0 and block 1 NBGs compiled to int16 via ACUITY Docker.
+   - block0: `network_binary.nb` 23,718,496 bytes, input/output shape 1x32x896 int16.
+   - block1: `network_binary.nb` 23,948,640 bytes, identical interface.
+2. Built `scripts/board/npu_chain_runner.c` — a C VIPLite runner that:
+   - Creates two independent `vip_network` handles from separate NBG files.
+   - Prepares both networks (load-once, no reload).
+   - In each iteration: runs block0 → copies output buffer to block1 input → runs block1.
+   - Measures wall time, NPU profile time, and confirms both networks stay loaded.
+3. Deployed and ran on Orange Pi Zero 3W (VIPLite 2.0.3.2-AW-2024-08-30,
+   `/dev/vipcore`, `cid=0x1000003b`).
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| VIPLite driver | 2.0.3.2-AW-2024-08-30 |
+| Block0 create network | 40.4 ms |
+| Block0 prepare network | 0.5 ms |
+| Block1 create network | 28.7 ms |
+| Block1 prepare network | 0.5 ms |
+| Chain wall (mean, 5 iters) | **10,265 us** (10.3 ms) |
+| Chain wall (min) | 10,205 us |
+| Chain wall (max) | 10,475 us |
+| Per-iteration stable | **YES** (no reload detected) |
+| Block0 NPU profile | ~4,930 us |
+| Block1 NPU profile | ~5,100 us |
+| Buffer sizes match | 57,344 bytes (1×32×896 int16) |
+| Both networks loaded simultaneously | **YES** |
+
+### Implication for Full 24-Block Chain
+
+- Per-block NPU time: ~5 ms
+- Estimated 26-stage chain (embedding + 24 blocks + final): ~130 ms/token forward pass
+- Estimated throughput: ~7-8 tok/s (prefill cost dominates)
+- Total NBG size: ~1,063 MB (fits within 2.9 GB available Orange Pi RAM)
+- No per-token NBG reload required
+
+### Verdict
+
+**Gate 2B PASSES.** VIPLite supports creating, preparing, and running multiple
+independent networks simultaneously. Two Qwen2.5 decoder-block int16 NBGs chain
+stably on the Orange Pi NPU with no per-iteration reload overhead. The
+per-token reload problem (estimated 350 ms/NBG) is solved by the persistent
+Multi-Graph pattern.
+
+Proceed to Gate 2C: full 26-NBG chain on Orange Pi.

@@ -1175,9 +1175,18 @@ workspace artifacts.
       does not cause catastrophic failure. The monolithic int16 failure (cosine
       0.236) was an aggregate-graph limit, not depth-accumulation.
     - Proceed to Gate 2B (VIPLite Multi-Graph on Orange Pi).
+  - Gate 2B -- VIPLite Multi-Graph: **PASSED** on Orange Pi at 192.168.31.225.
+    - Built `scripts/board/npu_chain_runner.c` — C runner with two independent
+      VIPLite networks loaded simultaneously.
+    - Block0 (23.7 MB) and block1 (23.9 MB) int16 NBGs compiled via ACUITY.
+    - Both networks created, prepared, and run in a chain without reload.
+    - Results: mean chain wall 10,265 us (10.3ms), NPU profile 4930us+5100us,
+      stable across 5 iterations, no reload overhead.
+    - Estimated 26-stage full chain: ~130ms/token forward pass, ~7-8 tok/s.
+    - NBG total ~1,063 MB fits within Orange Pi 2.9 GB available RAM.
   - Report updated: `reports/q2-qwen-block-nbg.md`.
-  - Changes: `scripts/host/make_real_llm_onnx.py` (+150 lines),
-    `scripts/host/q2_simulate_int16_chain.py` (new, ~330 lines).
+  - Changes: `scripts/board/npu_chain_runner.c` (new),
+    `scripts/host/prepare_chain_input.py` (new).
 
 - Task V1-hybrid-vlm-cpu completed on Orange Pi Zero 3W at `192.168.31.225`.
   - Verified llama.cpp at commit `be4a6a6` with multimodal (mmproj) support;
@@ -1210,10 +1219,10 @@ workspace artifacts.
 
 ## Next Gate
 
-Q2 Gate 2B continuation: investigate VIPLite Multi-Graph API on Orange Pi
-(192.168.31.225), build 2-NBG proof-of-concept, then full 26-NBG chain only if
-Multi-Graph is viable. Gate 2A already passed host coherence; the remaining risk
-is the runtime's ability to keep all NBGs resident without per-token reload.
+Q2 Gate 2B continuation: VIPLite Multi-Graph chaining PASSED on Orange Pi.
+  2-NBG chain (block0->block1) runs stably at 10.3ms/iteration with both NBGs
+  loaded once. Estimated full 26-NBG chain: ~130ms/token forward pass, ~7-8 tok/s.
+  Gate 2C (full 26-NBG chain) is the remaining step.
 
 NPU-vision remains valid (MobileCLIP-S0 at 22.6ms). SmolLM2-135M int16 runs on
 Orange Pi NPU at 21 tok/s. Qwen2.5-0.5B block-chaining is the active NPU LLM path.
