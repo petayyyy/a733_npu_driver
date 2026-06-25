@@ -59,19 +59,17 @@ external-data ONNX graph.
 
 Report: [b1b](../reports/b1b-benchmark-matrix.md)
 
-## Blocker 4 — SmolVLM SigLIP vision encoder on NPU (TOOLCHAIN RESOLVED, E2E PENDING)
+## Blocker 4 — SmolVLM SigLIP vision encoder on NPU (RESOLVED at host level, e2e injection pending)
 
-SmolVLM-256M SigLIP encoder (Idefics3 wrapper): ONNX exports (357 MB,
-1×3×512×512 → 1×64×576) but ACUITY 6.30.22 crashes at Conv shape inference
-(`_conv_shape`, smart_toolkit.py:1571 — IndexError) on the patch embedding
-Conv (kernel=16, stride=16, in=3, out=768).
+SmolVLM-256M SigLIP encoder (Idefics3 wrapper): **Conv→Reshape+MatMul rewrite
+succeeded.** NBG exports (271 MB, Error 0), runs on Orange Pi NPU at
+5.94 sec/image (verified: `cid=0x1000003b`, `vpm run ret=0`). Rebuilt with
+real-image calibration (fl=15, range [-1,1]). **Host quality gate PASSED:
+NPU int16 vs PyTorch FP32 cosine 0.9914** (same dog.jpg input). Per-token
+cosine 0.93–0.999.
 
-**V2b/V2c update**: Conv→Reshape+MatMul rewrite **succeeded**. NBG exports
-(271 MB, Error 0), runs on Orange Pi NPU at 5.94 sec/inference (verified:
-`cid=0x1000003b`, `vpm run ret=0`). Rebuilt with real-image calibration
-(fl=15, range [-1,1]). Toolchain path fully proven. End-to-end VLM accuracy
-pending embedding injection into llama.cpp decoder. Not resolved until
-answers validated.
+Toolchain fully proven. Embedding injection into llama.cpp decoder remains
+as software integration step. V1 CPU-only remains runnable deliverable.
 
 Reports: [v2](../reports/v2-hybrid-vlm-npu-offload.md), [v2b](../reports/v2b-smolvlm-vision-npu-retry.md), [v2c](../reports/v2c-vlm-npu-e2e.md)
 
